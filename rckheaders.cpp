@@ -2,6 +2,25 @@
 #include <raylib.h>
 #include <raymath.h>
 
+class Platform
+{
+    private:
+        float coord_array[4];
+    
+    public:
+        Rectangle body; // top left coords, then width & height
+        Color color;
+        Vector2 dir;
+        
+        float* body_coords()
+        {
+            coord_array[0] = body.x;
+            coord_array[1] = body.y;
+            coord_array[2] = body.width;
+            coord_array[3] = body.height;
+            return coord_array;
+        }        
+};
 
 class Player
 {
@@ -56,27 +75,61 @@ class Player
             if (pos.y < 0) pos.y = 0;
         }
 
+        void platformCollision(float dt, Vector2* upos,Platform* platforms, int platformsMax )
+        {
+            for (int i = 0; i < platformsMax; ++i)
+            {
+
+            Rectangle checkrect = {upos->x - size,upos->y - size,size*2,size*2};
+
+            if (CheckCollisionRecs(checkrect, platforms[i].body))
+            {
+                Rectangle overlap = GetCollisionRec(checkrect, platforms[i].body);
+
+                if (overlap.width > overlap.height) //y axis collision
+                {
+                    if (pos.y < platforms[i].body.y)
+                    {
+                        pos.x = upos->x;
+                        pos.y += platforms[i].dir.y;
+                        dir.y = 0;
+                        //dir.x = platforms[i]->dir.x;
+                    }
+                    if (pos.y > platforms[i].body.y + platforms[i].body.height)
+                    {
+                        pos.x = upos->x;
+                        pos.y += platforms[i].dir.y;
+                        dir.y = 0;
+                    }
+                }
+                else //x axis
+                {
+                    if (pos.x < platforms[i].body.x)
+                    {
+                        pos.y = upos->y;
+                        pos.x += platforms[i].dir.x;
+                        dir.x = 0;
+                    }
+                    if (pos.x > platforms[i].body.x + platforms[i].body.width)
+                    {
+                        pos.y = upos->y;
+                        pos.x += platforms[i].dir.x;
+                        dir.x = 0;
+                    }
+
+                }
+                
+            }
+            else pos = *upos;
+
+            platforms[i].body.y += platforms[i].dir.y;
+            platforms[i].body.x += platforms[i].dir.x;
+        }
+        }
+
         
 };
 
-class Platform
-{
-    private:
-        float coord_array[4];
-    
-    public:
-        Rectangle body; // top left coords, then width & height
-        Color color;
-        Vector2 dir;
-        
-        float* body_coords()
-        {
-            coord_array[0] = body.x;
-            coord_array[1] = body.y;
-            coord_array[2] = body.width;
-            coord_array[3] = body.height;
-            return coord_array;
-        }        
-};
+
 
 

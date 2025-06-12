@@ -10,7 +10,7 @@ const int fpsMax = 60;
 float xMSpeed = 0.9; //movement speed coefficients
 float yMSpeed = 0.8;
 
-const int platformMax = 8;
+const int platformsMax = 8;
 
 Vector2 upos;
 
@@ -30,13 +30,21 @@ int main()
     dude.x_max_vel = 2.8;
     dude.y_max_vel = 3.0;
     
-    Platform* platforms[256];
+    Platform platforms[256];
     //Platform* ppt = platforms[0];
-    for (int i = 0; i < platformMax; ++i) 
+    for (int i = 0; i < platformsMax; ++i) 
     {
 
-        platforms[i] = new Platform;
-        platforms[i]->body =
+       
+
+        platforms[i].color = WHITE;
+
+        platforms[i].body.x = (rand() % 1000);
+        platforms[i].body.y = (rand() % 1000);
+        platforms[i].body.width = (rand() % 100);
+        platforms[i].body.height = (rand() % 100);
+
+        platforms[i].dir = {(float) (rand() % 10) / 2,(float) (rand() % 10) / 2};
     }
  
     InitWindow(scrWidth, scrHeight, "pgame dot exe");
@@ -58,9 +66,9 @@ int main()
         DrawFPS(10, 10);
 
 
-        for (int i = 0; i < platformMax; ++i)
+        for (int i = 0; i < platformsMax; ++i)
         {
-            DrawRectangleRec(platforms[i]->body, platforms[i]->color);
+            DrawRectangleRec(platforms[i].body, platforms[i].color);
         }
         
         //DrawRectangleRec(checkrect, GREEN); //bounding box
@@ -69,64 +77,23 @@ int main()
         EndDrawing();
 
         upos = dude.updated_pos(dt);
-        checkrect = {upos.x - dude.size,upos.y - dude.size,dude.size*2,dude.size*2};
+        
 
-        if (CheckCollisionRecs(checkrect, baseplate.body))
-        {
-            Rectangle overlap = GetCollisionRec(checkrect, baseplate.body);
-
-            if (overlap.width > overlap.height) //y axis collision
-            {
-                if (dude.pos.y < baseplate.body.y)
-                {
-                    dude.pos.x = upos.x;
-                    dude.pos.y += baseplate.dir.y;
-                    dude.dir.y = 0;
-                    //dude.dir.x = baseplate.dir.x;
-                }
-                if (dude.pos.y > baseplate.body.y + baseplate.body.height)
-                {
-                    dude.pos.x = upos.x;
-                    dude.pos.y += baseplate.dir.y;
-                    dude.dir.y = 0;
-                }
-            }
-            else //x axis
-            {
-                if (dude.pos.x < baseplate.body.x)
-                {
-                    dude.pos.y = upos.y;
-                    dude.pos.x += baseplate.dir.x;
-                    dude.dir.x = 0;
-                }
-                if (dude.pos.x > baseplate.body.x + baseplate.body.width)
-                {
-                    dude.pos.y = upos.y;
-                    dude.pos.x += baseplate.dir.x;
-                    dude.dir.x = 0;
-                }
-
-            }
-            
-        }
-        else dude.pos = upos;
-         
-            
+        dude.platformCollision(dt,&upos,platforms, platformsMax);
             
         
         dude.border_check(scrWidth, scrHeight);
         
         //up & down
-        /*if (baseplate.body.y + baseplate.body.height > scrHeight - scrHeight/4.0 || baseplate.body.y + baseplate.body.height < scrHeight/4.0 ) 
+        /*if (platforms[i]->body.y + platforms[i]->body.height > scrHeight - scrHeight/4.0 || platforms[i]->body.y + platforms[i]->body.height < scrHeight/4.0 ) 
         {
-            baseplate.dir.y = -baseplate.dir.y;
+            platforms[i]->dir.y = -platforms[i]->dir.y;
         }
-        if (baseplate.body.x + baseplate.body.width > scrWidth - scrWidth/4.0 || baseplate.body.x + baseplate.body.width < scrWidth/4.0 ) 
+        if (platforms[i]->body.x + platforms[i]->body.width > scrWidth - scrWidth/4.0 || platforms[i]->body.x + platforms[i]->body.width < scrWidth/4.0 ) 
         {
-            baseplate.dir.x = -baseplate.dir.x;
+            platforms[i]->dir.x = -platforms[i]->dir.x;
         }*/
-        baseplate.body.y += baseplate.dir.y;
-        baseplate.body.x += baseplate.dir.x;
+        
         
 
     }

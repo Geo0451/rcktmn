@@ -1,50 +1,51 @@
+#include <cstdlib>
 #include <iostream>
 #include <raylib.h>
 #include "rckheaders.cpp"
-#include <random>
+
+
 
 const int scrWidth = 1000;
 const int scrHeight = 1000;
 const int fpsMax = 60;
 
-float xMSpeed = 0.9; //movement speed coefficients
-float yMSpeed = 0.8;
+float xMSpeed = 0.9f; //movement speed coefficients for WASD
+float yMSpeed = 0.8f;
 
-const int platformsMax = 8;
+const int platformsMax = 80;
 
 Vector2 upos;
 
 int main()
 {
-    Player dude;
-    dude.clr = RED;
+    srand(54);
+    Player dude = {
+        (Vector2) {scrWidth / 4.0f, scrHeight / 4.0f}, // pos
+        (Vector2) {0.1, 0}, // dir
+        2.0f, // speed
+        10.0f, // size
+        RED, // color
 
-    dude.pos.x = scrWidth / 4.0;
-    dude.pos.y = scrHeight / 4.0;
-    dude.dir.x = 0.1;
-    dude.dir.y = 0;
-    dude.speed = 2;
-    dude.size = 10;
+        1.05f, // x-axis friction
+        2.8f, // x max velocity
+        3.0f // y max velocity
+    };    
 
-    dude.x_friction = 1.05;
-    dude.x_max_vel = 2.8;
-    dude.y_max_vel = 3.0;
-    
+    //create some random platforms
     Platform platforms[256];
-    //Platform* ppt = platforms[0];
     for (int i = 0; i < platformsMax; ++i) 
     {
-
-       
-
+        platforms[i].body =     (Rectangle) {
+             (float) (rand() % 1000), // x
+             (float) (rand() % 1000), // y
+             (float) (rand() % 100), // width
+             (float) (rand() % 100) }; //height
+        
         platforms[i].color = WHITE;
-
-        platforms[i].body.x = (rand() % 1000);
-        platforms[i].body.y = (rand() % 1000);
-        platforms[i].body.width = (rand() % 100);
-        platforms[i].body.height = (rand() % 100);
-
-        platforms[i].dir = {(float) (rand() % 10) / 2,(float) (rand() % 10) / 2};
+        platforms[i].dir = {0,0};
+        /*platforms[i].dir = *{
+            (float) (rand() % 10) / 2,
+            (float) (rand() % 10) / 2 };*/
     }
  
     InitWindow(scrWidth, scrHeight, "pgame dot exe");
@@ -53,34 +54,51 @@ int main()
     while (!WindowShouldClose())
     {
         float dt = GetFrameTime();   
-        //std::cout << dt;
+        //WASD Controls
+
         if (IsKeyDown(KEY_A)) dude.dir.x -= xMSpeed;
         if (IsKeyDown(KEY_D)) dude.dir.x += xMSpeed;
         if (IsKeyDown(KEY_W)) dude.dir.y -= yMSpeed;
         if (IsKeyDown(KEY_S)) dude.dir.y += yMSpeed;
 
-        //std::cout << dude.dir.x << " " << dude.dir.y << std::endl;
+        //update everything
+        dude.dir.y += 0.1f;
+        upos = dude.updated_pos(dt);      
+        
+        
+        // collision code
+        // checkrect is a bounding box for the player
         Rectangle checkrect = {upos.x - dude.size,upos.y - dude.size,dude.size*2,dude.size*2};
-        ClearBackground(BLACK);
-        BeginDrawing();
-        DrawFPS(10, 10);
-
-
-        for (int i = 0; i < platformsMax; ++i)
-        {
-            DrawRectangleRec(platforms[i].body, platforms[i].color);
+        bool collided = false;
+        int i;
+        for (i = 0; i < platformsMax; ++i)
+        {            
+            if (CheckCollisionRecs(checkrect, platforms[i].body))
+            {
+                collided = true;
+                break;
+            }        
         }
-        
-        //DrawRectangleRec(checkrect, GREEN); //bounding box
-        DrawCircleV(dude.pos, dude.size, dude.clr);
+        if (collided == false) dude.pos = upos; // no collision? use updated position as usual
+        else 
+        {
+            Rectangle overlap = GetCollisionRec(checkrect, platforms[i].body);
 
-        EndDrawing();
+                    if (overlap.width > overlap.height) //y axis collision, (top or bottom)
+                    {
+                        //std::cout << "AAA\n";
+                        dude.dir.y = 0;
+                        if (dude.pos.y < platforms[i].body.y)  dude.pos.y -= overlap.height;
+                        else dude.pos.y += overlap.height;
+                    }
+                    else 
+                    {
+                        dude.dir.x = 0;
+                        if (dude.pos.x < platforms[i].body.x)  dude.pos.x -= overlap.width;
+                        else dude.pos.x += overlap.width;
 
-        upos = dude.updated_pos(dt);
-        
-
-        dude.platformCollision(dt,&upos,platforms, platformsMax);
-            
+                    }                
+        }            
         
         dude.border_check(scrWidth, scrHeight);
         
@@ -93,6 +111,23 @@ int main()
         {
             platforms[i]->dir.x = -platforms[i]->dir.x;
         }*/
+
+
+        ClearBackground(BLACK);
+        BeginDrawing();
+        DrawFPS(10, 10);
+
+        //draw all rectangles
+        for (int i = 0; i < platformsMax; ++i)
+        {
+            DrawRectangleRec(platforms[i].body, platforms[i].color);
+        }
+        
+        //draw player hitbox(?) and then player
+        //DrawRectangleRec({dude.pos.x - dude.size,dude.pos.y - dude.size,dude.size*2,dude.size*2}, GREEN); //bounding box
+        DrawCircleV(dude.pos, dude.size, dude.clr);
+
+        EndDrawing();
         
         
 

@@ -9,17 +9,18 @@ const int scrWidth = 1000;
 const int scrHeight = 1000;
 const int fpsMax = 60;
 
-float xMSpeed = 0.9f; //movement speed coefficients for WASD
+float xMSpeed = 0.85f; //movement speed coefficients for WASD
 float yMSpeed = 0.8f;
 
-const int platformsMax = 80;
+const int platformsMax = 10;
 
 Vector2 upos;
 
 int main()
 {
-    srand(54);
-    Player dude = {
+    srand(5854);
+    Make draw;
+    Player plr = {
         (Vector2) {scrWidth / 4.0f, scrHeight / 4.0f}, // pos
         (Vector2) {0.1, 0}, // dir
         2.0f, // speed
@@ -33,13 +34,14 @@ int main()
 
     //create some random platforms
     Platform platforms[256];
+    
     for (int i = 0; i < platformsMax; ++i) 
     {
         platforms[i].body =     (Rectangle) {
              (float) (rand() % 1000), // x
              (float) (rand() % 1000), // y
-             (float) (rand() % 100), // width
-             (float) (rand() % 100) }; //height
+             (float) (rand() % (100 - 50 + 1) + 50), // width, uses formula rand() - (max - min + 1) + min to clamp random
+             (float) (rand() % (100 - 50 + 1) + 50) }; //height
         
         platforms[i].color = WHITE;
         platforms[i].dir = {0,0};
@@ -55,20 +57,31 @@ int main()
     {
         float dt = GetFrameTime();   
         //WASD Controls
+        if (IsKeyDown(KEY_A)) plr.dir.x -= xMSpeed;
+        if (IsKeyDown(KEY_D)) plr.dir.x += xMSpeed;
+        //if (IsKeyDown(KEY_W)) plr.dir.y -= yMSpeed;
+        if (IsKeyDown(KEY_W)) 
+        {
+            if (plr.canJump)
+            {
+                plr.dir.y -= yMSpeed * 4;
+                
+            }
+            
+        }
+        if (IsKeyDown(KEY_S)) plr.dir.y += yMSpeed;
 
-        if (IsKeyDown(KEY_A)) dude.dir.x -= xMSpeed;
-        if (IsKeyDown(KEY_D)) dude.dir.x += xMSpeed;
-        if (IsKeyDown(KEY_W)) dude.dir.y -= yMSpeed;
-        if (IsKeyDown(KEY_S)) dude.dir.y += yMSpeed;
+        draw.select();
+
 
         //update everything
-        dude.dir.y += 0.1f;
-        upos = dude.updated_pos(dt);      
+        plr.dir.y += 0.1f;
+        upos = plr.updated_pos(dt);      
         
         
         // collision code
         // checkrect is a bounding box for the player
-        Rectangle checkrect = {upos.x - dude.size,upos.y - dude.size,dude.size*2,dude.size*2};
+        Rectangle checkrect = {upos.x - plr.size,upos.y - plr.size,plr.size*2,plr.size*2};
         bool collided = false;
         int i;
         for (i = 0; i < platformsMax; ++i)
@@ -79,40 +92,36 @@ int main()
                 break;
             }        
         }
-        if (collided == false) dude.pos = upos; // no collision? use updated position as usual
-        else 
+        if (collided) 
         {
             Rectangle overlap = GetCollisionRec(checkrect, platforms[i].body);
 
                     if (overlap.width > overlap.height) //y axis collision, (top or bottom)
                     {
                         //std::cout << "AAA\n";
-                        dude.dir.y = 0;
-                        if (dude.pos.y < platforms[i].body.y)  dude.pos.y -= overlap.height;
-                        else dude.pos.y += overlap.height;
+                        plr.dir.y = 0;
+                        if (plr.pos.y < platforms[i].body.y)  
+                        {
+                            plr.pos.y -= overlap.height;
+                            plr.canJump = true;
+                        }
+                        else plr.pos.y += overlap.height;
                     }
                     else 
                     {
-                        dude.dir.x = 0;
-                        if (dude.pos.x < platforms[i].body.x)  dude.pos.x -= overlap.width;
-                        else dude.pos.x += overlap.width;
+                        plr.dir.x = 0;
+                        if (plr.pos.x < platforms[i].body.x)  plr.pos.x -= overlap.width;
+                        else plr.pos.x += overlap.width;
 
                     }                
-        }            
-        
-        dude.border_check(scrWidth, scrHeight);
-        
-        //up & down
-        /*if (platforms[i]->body.y + platforms[i]->body.height > scrHeight - scrHeight/4.0 || platforms[i]->body.y + platforms[i]->body.height < scrHeight/4.0 ) 
-        {
-            platforms[i]->dir.y = -platforms[i]->dir.y;
         }
-        if (platforms[i]->body.x + platforms[i]->body.width > scrWidth - scrWidth/4.0 || platforms[i]->body.x + platforms[i]->body.width < scrWidth/4.0 ) 
+        else  
         {
-            platforms[i]->dir.x = -platforms[i]->dir.x;
-        }*/
-
-
+            plr.pos = upos;  // no collision? use updated position as usual       
+            plr.canJump = false;  
+        }
+        plr.border_check(scrWidth, scrHeight);
+        
         ClearBackground(BLACK);
         BeginDrawing();
         DrawFPS(10, 10);
@@ -124,8 +133,11 @@ int main()
         }
         
         //draw player hitbox(?) and then player
-        //DrawRectangleRec({dude.pos.x - dude.size,dude.pos.y - dude.size,dude.size*2,dude.size*2}, GREEN); //bounding box
-        DrawCircleV(dude.pos, dude.size, dude.clr);
+        DrawRectangleRec({plr.pos.x - plr.size,plr.pos.y - plr.size,plr.size*2,plr.size*2}, GREEN); //bounding box
+        DrawCircleV(plr.pos, plr.size, plr.clr);
+
+        //DrawRectangleRec(draw.selection,GREEN);
+        DrawRectangleLinesEx(draw.selection, 1, GREEN);
 
         EndDrawing();
         

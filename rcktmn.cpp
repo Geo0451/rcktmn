@@ -1,5 +1,6 @@
 #include <cstdlib>
 #include <iostream>
+#include <vector>
 #include <raylib.h>
 #include "rckheaders.cpp"
 
@@ -12,14 +13,18 @@ const int fpsMax = 60;
 float xMSpeed = 0.85f; //movement speed coefficients for WASD
 float yMSpeed = 0.8f;
 
-const int platformsMax = 10;
+//const int platformsMax = 100;
 
 Vector2 upos;
 
 int main()
 {
     srand(5854);
+    
     Make draw;
+    draw.npt.color = WHITE;
+    bool makerMode = true;
+
     Player plr = {
         (Vector2) {scrWidth / 4.0f, scrHeight / 4.0f}, // pos
         (Vector2) {0.1, 0}, // dir
@@ -33,9 +38,9 @@ int main()
     };    
 
     //create some random platforms
-    Platform platforms[256];
+    std::vector<Platform> platforms(10,{0});
     
-    for (int i = 0; i < platformsMax; ++i) 
+    for (int i = 0; i < 10; ++i) 
     {
         platforms[i].body =     (Rectangle) {
              (float) (rand() % 1000), // x
@@ -70,9 +75,17 @@ int main()
             
         }
         if (IsKeyDown(KEY_S)) plr.dir.y += yMSpeed;
-
-        draw.select();
-
+        
+        if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_M))
+        {
+            makerMode = !makerMode;
+        }
+        if (makerMode)
+        {
+            draw.select(platforms);
+            DrawText("MAKER MODE ON", 10, 10, 30, WHITE);
+        }
+    
 
         //update everything
         plr.dir.y += 0.1f;
@@ -84,7 +97,7 @@ int main()
         Rectangle checkrect = {upos.x - plr.size,upos.y - plr.size,plr.size*2,plr.size*2};
         bool collided = false;
         int i;
-        for (i = 0; i < platformsMax; ++i)
+        for (i = 0; i < platforms.size(); ++i)
         {            
             if (CheckCollisionRecs(checkrect, platforms[i].body))
             {
@@ -124,10 +137,10 @@ int main()
         
         ClearBackground(BLACK);
         BeginDrawing();
-        DrawFPS(10, 10);
+        DrawFPS(10, scrHeight - 20);
 
         //draw all rectangles
-        for (int i = 0; i < platformsMax; ++i)
+        for (int i = 0; i < platforms.size(); ++i)
         {
             DrawRectangleRec(platforms[i].body, platforms[i].color);
         }
@@ -137,7 +150,7 @@ int main()
         DrawCircleV(plr.pos, plr.size, plr.clr);
 
         //DrawRectangleRec(draw.selection,GREEN);
-        DrawRectangleLinesEx(draw.selection, 1, GREEN);
+        DrawRectangleLinesEx(draw.npt.body, 1, GREEN);
 
         EndDrawing();
         

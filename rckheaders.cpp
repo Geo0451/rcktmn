@@ -1,6 +1,7 @@
 #include <iostream>
 #include <raylib.h>
 #include <raymath.h>
+#include <vector>
 
 class Platform
 { 
@@ -57,27 +58,56 @@ class Make
 {
     public:
     //bool dragging = false;
-    Rectangle selection = {0};
+    Platform npt;
+    Vector2 point_a;
+    Vector2 point_b;
 
-    void select()
+    void select(std::vector<Platform>& pt)
     {
+
         if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
-        {   
-            selection = {0};
-            //dragging = true;
-            selection.x = GetMouseX();
-            selection.y = GetMouseY();
+        {
+            point_a = GetMousePosition();
         };
         if (IsMouseButtonDown(MOUSE_BUTTON_LEFT))
         {
-            selection.width = GetMouseX() - selection.x;
-            selection.height = GetMouseY() - selection.y;
+            point_b = GetMousePosition();
+            if (point_a.x < point_b.x) // RIGHT SIDE
+            {
+                npt.body.x = point_a.x;
+                npt.body.width = point_b.x - point_a.x;
+                if (point_a.y < point_b.y) // BOTTOM SIDE
+                {                    
+                    npt.body.y = point_a.y;
+                    npt.body.height = point_b.y - point_a.y;
+                }
+                else // TOP SIDE
+                {
+                    npt.body.y = point_b.y;
+                    npt.body.height = point_a.y - point_b.y;
+                }
+            }
+            else // LEFT SIDE
+            {
+                npt.body.x = point_b.x;
+                npt.body.width = point_a.x - point_b.x;
+                if (point_a.y < point_b.y) // BOTTOM SIDE
+                {
+                    npt.body.y = point_a.y;
+                    npt.body.height = point_b.y - point_a.y;
+
+                }
+                else { // TOP SIDE
+                {
+                    npt.body.y = point_b.y;
+                    npt.body.height = point_a.y - point_b.y;
+                }
+                }
+            }
         }
         if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT))
-        {
-            //dragging = false;
-            selection.width = GetMouseX() - selection.x;
-            selection.height = GetMouseY() - selection.y;
+        {   
+            pt.push_back(npt);
         }
     }
 

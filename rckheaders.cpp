@@ -3,6 +3,14 @@
 #include <raymath.h>
 #include <vector>
 
+class Message
+{
+    public:
+        float lifetime = 1.0f; // in seconds. Once 0, delete
+        std::string content = "Message";
+        Color color = WHITE;
+
+};
 class Platform
 { 
     public:
@@ -104,11 +112,13 @@ class Make
                 }
                 }
             }
+            
         }
         if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT))
         {   
             pt.push_back(npt);
         }
+        
     }
 
 };

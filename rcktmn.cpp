@@ -2,6 +2,8 @@
 #include <fstream>
 #include <iostream>
 #include <vector>
+#include <string>
+#include <random>
 #include <raylib.h>
 #include "rckheaders.cpp"
 
@@ -35,7 +37,11 @@ void handlePlayerInput(Player& player)
     if (IsKeyDown(KEY_D)) player.dir.x += HORIZONTAL_MOVE_SPEED;
     if (IsKeyDown(KEY_S)) player.dir.y += VERTICAL_MOVE_SPEED;
 
-    // Single impulse jump
+    // Hold space for auto-jump when grounded
+    if (IsKeyDown(KEY_SPACE) && player.canJump)
+        player.dir.y -= VERTICAL_MOVE_SPEED * JUMP_MULTIPLIER;
+
+    // Single impulse jump fallback
     if (IsKeyPressed(KEY_W) && player.canJump)
         player.dir.y -= VERTICAL_MOVE_SPEED * JUMP_MULTIPLIER;
 }
@@ -50,7 +56,7 @@ void saveLevelToSlot(const TileMap& tileMap, const Player& player, int slot)
 
     for (int r = 0; r < WORLD_ROWS; r++)
         for (int c = 0; c < WORLD_COLS; c++)
-            if (tileMap.grid[r][c].solid)
+            if (tileMap.isSolid(c, r))
                 saveFile << c << " " << r << "\n";
 
     saveFile.close();
@@ -75,7 +81,7 @@ bool loadLevelFromSlot(TileMap& tileMap, Player& player, int slot)
     int col, row;
     while (loadFile >> col >> row)
         if (tileMap.inBounds(col, row))
-            tileMap.grid[row][col] = {true, WHITE};
+            tileMap.tileAt(col, row) = {true, WHITE};
 
     loadFile.close();
     return true;
@@ -166,14 +172,16 @@ int main()
     int currentSlot = 1;
 
     enum SaveLoadMode { NONE, SAVING, LOADING };
+    enum GameState { MENU, PREVIEW, PLAYING };
     SaveLoadMode pauseMode = NONE;
+    GameState gameState = MENU;
 
     bool slotHasData[MAX_SLOTS + 1] = {};
 
     std::vector<Message> consoleMessages;
     consoleMessages.push_back({
         7.0f,
-        "WELCOME 2 RCKTMN\n WASD:MOVE  SCROLL:ZOOM\n CTRL-M:MAKER  L:DRAW  R:ERASE\n CTRL-S/L:SAVE/LOAD"
+        "WELCOME 2 RCKTMN\n WASD:MOVE  W/SPACE:JUMP  SCROLL:ZOOM\n CTRL-M:MAKER  L:DRAW  R:ERASE\n CTRL-S/L:SAVE/LOAD"
     });
 
     Player player = {
@@ -189,11 +197,28 @@ int main()
     };
 
     TileMap tileMap;
+    unsigned int seedVal = 0;
+    std::string seedInput = "";
+    bool previewGenerated = false;
+
+    // World generation parameters
+    float surfaceHeight = 0.25f;        // 0.0-1.0, where on screen is surface
+    float surfaceRoughness = 1.0f;      // 1.0-5.0, higher = more jagged
+    float caveDensity = 1.0f;           // 0.1-5.0, how many caves (0.1=rare, 5.0=very dense)
+    float caveThreshold = 0.40f;        // 0.05-0.80, higher = fewer caves
+    float caveSurfaceBias = 0.22f;      // 0.00-0.50, higher = more surface overlap
+    int caveSmoothIterations = 5;       // 1-12, more = smoother/connected caves
+    int numWorms = 20;                  // 5-40, number of cave worms (DEPRECATED - kept for compatibility)
+    int wormMinLength = 50;             // 30-100 (DEPRECATED)
+    int wormMaxLength = 200;            // 150-400 (DEPRECATED)
+    int wormMinRadius = 2;              // 1-4 (DEPRECATED)
+    int wormMaxRadius = 5;              // 3-7 (DEPRECATED)
+    float wormDownwardBias = 0.7f;      // 0.3-1.0 (DEPRECATED)
 
     // ----- Camera setup -----
     Camera2D camera    = {};
     camera.offset      = {scrWidth / 2.0f, scrHeight / 2.0f};
-    camera.target      = player.pos;
+    camera.target      = {scrWidth / 2.0f, scrHeight / 2.0f};
     camera.rotation    = 0.0f;
     camera.zoom        = 1.0f;
 
@@ -204,12 +229,245 @@ int main()
     {
         float deltaTime = GetFrameTime();
 
-        // ----- CAMERA ZOOM (scroll wheel) -----
+        // === MENU STATE ===
+        if (gameState == MENU)
+        {
+            // Handle seed input
+            if (IsKeyPressed(KEY_BACKSPACE) && !seedInput.empty())
+                seedInput.pop_back();
+
+            int key = GetCharPressed();
+            while (key > 0)
+            {
+                if ((key >= '0' && key <= '9') || key == '-')
+                    if (seedInput.length() < 10) seedInput += (char)key;
+                key = GetCharPressed();
+            }
+
+            // Start generation on Enter
+            if (IsKeyPressed(KEY_ENTER))
+            {
+                if (seedInput.empty())
+                {
+                    std::random_device rd;
+                    seedVal = (unsigned int)rd();
+                }
+                else
+                {
+                    try { seedVal = (unsigned int)std::stoul(seedInput); }
+                    catch (...) { seedVal = 0; }
+                }
+                gameState = PREVIEW;
+                tileMap.generate(seedVal, surfaceHeight, surfaceRoughness, caveDensity, caveThreshold, caveSurfaceBias, caveSmoothIterations);
+                previewGenerated = true;
+            }
+
+            // Render menu
+            BeginDrawing();
+            ClearBackground(BLACK);
+
+            DrawText("RCKTMN - WORLD GENERATOR", scrWidth/2 - 250, 100, 40, WHITE);
+            DrawText("Enter Seed:", 300, 300, 30, YELLOW);
+            
+            // Input box
+            DrawRectangleLinesEx({250.0f, 350.0f, 500.0f, 50.0f}, 2, WHITE);
+            DrawText(seedInput.c_str(), 270, 365, 30, WHITE);
+            DrawText("(Leave empty for random seed)", 300, 420, 20, DARKGRAY);
+            DrawText("Press ENTER to generate world", 300, 480, 20, DARKGRAY);
+
+            EndDrawing();
+            continue;
+        }
+
+        // === PREVIEW STATE ===
+        if (gameState == PREVIEW)
+        {
+            // Slider interaction
+            Vector2 mouse = GetMousePosition();
+            const float labelX = 50.0f;
+            const float sliderX = 280.0f;
+            const float sliderW = 300.0f;
+            const float sliderH = 20.0f;
+            const float sliderSpacing = 60.0f;
+            const float valueX = sliderX + sliderW + 30.0f;
+            float sliderY = 150.0f;
+
+            // Helper lambda to draw and interact with sliders
+            auto drawSlider = [&](const char* label, float& value, float minVal, float maxVal, float sliderYPos) -> void
+            {
+                // Label on left
+                DrawText(label, (int)labelX, (int)sliderYPos, 16, WHITE);
+                
+                // Slider bar (clickable area)
+                Rectangle sliderBar = {sliderX, sliderYPos, sliderW, sliderH};
+                DrawRectangleRec(sliderBar, DARKGRAY);
+                DrawRectangleLinesEx(sliderBar, 2, WHITE);
+                
+                // Slider knob position
+                float t = (value - minVal) / (maxVal - minVal);
+                t = Clamp(t, 0.0f, 1.0f);
+                float knobX = sliderX + t * sliderW;
+                
+                // Check for click/drag anywhere on slider bar
+                if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, sliderBar))
+                {
+                    float newT = (mouse.x - sliderX) / sliderW;
+                    newT = Clamp(newT, 0.0f, 1.0f);
+                    value = minVal + newT * (maxVal - minVal);
+                }
+                
+                // Draw knob
+                DrawCircle((int)knobX, (int)(sliderYPos + sliderH * 0.5f), 8, YELLOW);
+                
+                // Value display on right
+                DrawText(TextFormat("%.2f", value), (int)valueX, (int)sliderYPos, 16, LIGHTGRAY);
+            };
+
+            auto drawIntSlider = [&](const char* label, int& value, int minVal, int maxVal, float sliderYPos) -> void
+            {
+                // Label on left
+                DrawText(label, (int)labelX, (int)sliderYPos, 16, WHITE);
+                
+                // Slider bar (clickable area)
+                Rectangle sliderBar = {sliderX, sliderYPos, sliderW, sliderH};
+                DrawRectangleRec(sliderBar, DARKGRAY);
+                DrawRectangleLinesEx(sliderBar, 2, WHITE);
+                
+                // Slider knob position
+                float t = (float)(value - minVal) / (float)(maxVal - minVal);
+                t = Clamp(t, 0.0f, 1.0f);
+                float knobX = sliderX + t * sliderW;
+                
+                // Check for click/drag anywhere on slider bar
+                if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, sliderBar))
+                {
+                    float newT = (mouse.x - sliderX) / sliderW;
+                    newT = Clamp(newT, 0.0f, 1.0f);
+                    value = (int)(minVal + newT * (float)(maxVal - minVal));
+                }
+                
+                // Draw knob
+                DrawCircle((int)knobX, (int)(sliderYPos + sliderH * 0.5f), 8, YELLOW);
+                
+                // Value display on right
+                DrawText(TextFormat("%d", value), (int)valueX, (int)sliderYPos, 16, LIGHTGRAY);
+            };
+
+            // Wait for ENTER to start game
+            if (IsKeyPressed(KEY_ENTER))
+            {
+                gameState = PLAYING;
+                // Place player on surface
+                int centerCol = WORLD_COLS / 2;
+                int surfRow = tileMap.getSurfaceRow(centerCol);
+                if (surfRow < WORLD_ROWS)
+                {
+                    player.pos.x = centerCol * TILE_SIZE + TILE_SIZE * 0.5f;
+                    player.pos.y = surfRow * TILE_SIZE - player.size - 1.0f;
+                }
+                camera.target = player.pos;
+            }
+
+            // ESC to go back to menu
+            if (IsKeyPressed(KEY_ESCAPE))
+            {
+                gameState = MENU;
+                seedInput = "";
+                previewGenerated = false;
+                continue;
+            }
+
+            // Render preview
+            BeginDrawing();
+            ClearBackground(BLACK);
+
+            DrawText("WORLD PREVIEW & GENERATION TUNING", scrWidth/2 - 300, 20, 40, YELLOW);
+
+            // Draw sliders on left side
+            DrawText("=== GENERATION PARAMETERS ===", (int)labelX, (int)(sliderY - 40), 20, SKYBLUE);
+            
+            drawSlider("Surface Height", surfaceHeight, 0.1f, 0.5f, sliderY);
+            sliderY += sliderSpacing;
+            
+            drawSlider("Surface Roughness", surfaceRoughness, 0.5f, 3.0f, sliderY);
+            sliderY += sliderSpacing;
+            
+            drawSlider("Cave Density", caveDensity, 0.1f, 5.0f, sliderY);
+            sliderY += sliderSpacing;
+
+            drawSlider("Cave Threshold", caveThreshold, 0.05f, 0.80f, sliderY);
+            sliderY += sliderSpacing;
+
+            drawSlider("Surface Bias", caveSurfaceBias, 0.00f, 0.50f, sliderY);
+            sliderY += sliderSpacing;
+
+            drawIntSlider("Collapse Iterations", caveSmoothIterations, 1, 12, sliderY);
+            sliderY += sliderSpacing;
+
+            // Check for regenerate button
+            Rectangle regenBtn = {labelX, sliderY + 10.0f, 220.0f, 40.0f};
+            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, regenBtn))
+            {
+                tileMap.generate(seedVal, surfaceHeight, surfaceRoughness, caveDensity, caveThreshold, caveSurfaceBias, caveSmoothIterations);
+                previewGenerated = true;
+            }
+            
+            // Also allow R key to regenerate
+            if (IsKeyPressed(KEY_R))
+            {
+                tileMap.generate(seedVal, surfaceHeight, surfaceRoughness, caveDensity, caveThreshold, caveSurfaceBias, caveSmoothIterations);
+                previewGenerated = true;
+            }
+
+            // Regenerate button
+            bool regenerateHovered = CheckCollisionPointRec(mouse, regenBtn);
+            DrawRectangleRec(regenBtn, regenerateHovered ? ORANGE : DARKGREEN);
+            DrawRectangleLinesEx(regenBtn, 2, regenerateHovered ? YELLOW : WHITE);
+            DrawText("REGENERATE (R)", (int)(regenBtn.x + 15), (int)(regenBtn.y + 10), 16, WHITE);
+
+            // Draw world preview on right side
+            float previewW = 700.0f;
+            float previewH = 700.0f;
+            float previewX = scrWidth - previewW - 50.0f;
+            float previewY = 120.0f;
+            float scaleX = previewW / (WORLD_COLS * TILE_SIZE);
+            float scaleY = previewH / (WORLD_ROWS * TILE_SIZE);
+
+            // Render world preview
+            for (int r = 0; r < WORLD_ROWS; r += 5)
+            {
+                for (int c = 0; c < WORLD_COLS; c += 5)
+                {
+                    if (tileMap.isSolid(c, r))
+                    {
+                        float px = previewX + c * TILE_SIZE * scaleX;
+                        float py = previewY + r * TILE_SIZE * scaleY;
+                        float pw = TILE_SIZE * scaleX + 1.0f;
+                        float ph = TILE_SIZE * scaleY + 1.0f;
+                        DrawRectangle((int)px, (int)py, (int)pw, (int)ph, tileMap.tileAt(c, r).color);
+                    }
+                }
+            }
+            DrawRectangleLinesEx({previewX, previewY, previewW, previewH}, 2, WHITE);
+
+            DrawText(("Seed: " + std::to_string(seedVal)).c_str(), 50, scrHeight - 100, 20, DARKGRAY);
+            DrawText("Press ENTER to start playing", 50, scrHeight - 60, 20, GREEN);
+            DrawText("Press ESC to change seed", 50, scrHeight - 30, 20, LIGHTGRAY);
+
+            EndDrawing();
+            continue;
+        }
+
+        // === PLAYING STATE ===
         float wheel = GetMouseWheelMove();
         if (wheel != 0.0f)
         {
             camera.zoom += wheel * ZOOM_STEP;
-            camera.zoom  = Clamp(camera.zoom, ZOOM_MIN, ZOOM_MAX);
+            float makerZoomMin = (float)scrWidth / (float)worldWidth;
+            float makerZoomMinY = (float)scrHeight / (float)worldHeight;
+            makerZoomMin = (makerZoomMin < makerZoomMinY) ? makerZoomMin : makerZoomMinY;
+            float zoomMin = makerMode ? makerZoomMin : ZOOM_MIN;
+            camera.zoom  = Clamp(camera.zoom, zoomMin, ZOOM_MAX);
         }
 
         // World-space mouse position (needed for maker mode under any zoom level)
@@ -254,8 +512,16 @@ int main()
             {
                 makerMode = !makerMode;
                 consoleMessages.push_back(makerMode
-                    ? Message{2.0f, "MAKER MODE ON  L:DRAW  R:ERASE", WHITE}
+                    ? Message{2.0f, "MAKER MODE ON  B:BLOCKS  L:DRAG  R:ERASE  CTRL-M:OFF", WHITE}
                     : Message{1.0f, "MAKER MODE OFF", WHITE});
+            }
+
+            // Block type hotkeys (only in maker mode, when menu not open)
+            if (makerMode && !tileMaker.showMenu)
+            {
+                if (IsKeyPressed(KEY_ONE)) tileMaker.blockType = 0;
+                if (IsKeyPressed(KEY_TWO)) tileMaker.blockType = 1;
+                if (IsKeyPressed(KEY_THREE)) tileMaker.blockType = 2;
             }
 
             if (makerMode)
@@ -301,11 +567,23 @@ int main()
             player.dir.y += GRAVITY;
             Vector2 nextPos = player.updated_pos(deltaTime);
             handleCollisions(player, nextPos, tileMap);
-            player.border_check(worldWidth, worldHeight);
         }
 
-        // Camera always follows the player
-        camera.target = player.pos;
+        // Camera follows the player in normal play; maker mode can zoom all the way out to a full-map overview
+        if (makerMode)
+        {
+            float makerZoomMin = (float)scrWidth / (float)worldWidth;
+            float makerZoomMinY = (float)scrHeight / (float)worldHeight;
+            makerZoomMin = (makerZoomMin < makerZoomMinY) ? makerZoomMin : makerZoomMinY;
+            if (camera.zoom <= makerZoomMin + 0.0001f)
+                camera.target = {(float)worldWidth * 0.5f, (float)worldHeight * 0.5f};
+            else
+                camera.target = player.pos;
+        }
+        else
+        {
+            camera.target = player.pos;
+        }
 
         // ----- RENDERING -----
         BeginDrawing();
@@ -316,7 +594,7 @@ int main()
 
             tileMap.draw(visibleWorld);
 
-            if (makerMode)
+            if (makerMode && !tileMaker.showMenu)
                 tileMaker.drawPreview(worldMouse);
 
             DrawCircleV(player.pos, player.size, player.clr);
@@ -332,6 +610,9 @@ int main()
         DrawText(zoomText, scrWidth - 100, scrHeight - 40, 16, DARKGRAY);
 
         drawConsoleMessages(consoleMessages);
+
+        if (makerMode && tileMaker.showMenu)
+            tileMaker.drawMenu();
 
         if (pauseMode != NONE)
         {

@@ -8,9 +8,9 @@
 
 // ===== WORLD GRID CONSTANTS =====
 const int TILE_SIZE  = 20;   // Matches player diameter (radius 10 * 2)
-// World is 3000x3000 tiles (large open world)
-const int WORLD_COLS = 3000; // World width  in tiles (60000px)
-const int WORLD_ROWS = 3000; // World height in tiles (60000px)
+// World is 512x512 tiles (reasonable size for generation)
+const int WORLD_COLS = 512;  // World width  in tiles (10240px)
+const int WORLD_ROWS = 512;  // World height in tiles (10240px)
 
 // ===== MESSAGE =====
 
@@ -208,14 +208,17 @@ class TileMap
                      Tile& t = tileAt(c, r);
                      t.solid = true;
                      
+                     // Safety check for height array bounds
+                     int surfaceHeight = (c >= 0 && c < (int)height.size()) ? height[c] : baseHeight;
+                     
                      // Color based on depth
-                     if (r < height[c])
+                     if (r < surfaceHeight)
                      {
                          // Above surface - air
                          t.solid = false;
                          t.color = WHITE;
                      }
-                     else if (r < height[c] + 10)
+                     else if (r < surfaceHeight + 10)
                      {
                          // Dirt layer
                          t.color = BROWN;
@@ -230,6 +233,7 @@ class TileMap
              
              // STEP 2: Generate cave pattern using organic wave function collapse
              int caveBoundary = baseHeight + (int)(heightVariation * 1.5f);
+             caveBoundary = Clamp(caveBoundary, baseHeight, WORLD_ROWS - 100);
              
              // Use Perlin noise to seed initial cave regions for organic shape
              std::vector<float> caveNoise(WORLD_COLS * WORLD_ROWS);
@@ -245,26 +249,30 @@ class TileMap
              // Initialize cave state based on Perlin noise threshold
              std::vector<bool> canBeCave(WORLD_COLS * WORLD_ROWS, false);
              float noiseThreshold = caveThreshold - (caveDensity - 1.0f) * 0.1f;
-             noiseThreshold = Clamp(noiseThreshold, 0.0f, 0.6f);
+             noiseThreshold = Clamp(noiseThreshold, 0.05f, 0.8f);
              
              for (int r = 0; r < WORLD_ROWS; ++r)
              {
                  for (int c = 0; c < WORLD_COLS; ++c)
                  {
+                     int idx = r * WORLD_COLS + c;
+                     if (idx < 0 || idx >= (int)canBeCave.size()) continue;  // Safety check
+                     
                      int distFromSurface = r - height[c];
-                     float depthFactor = Clamp((float)distFromSurface / 40.0f, 0.0f, 1.0f);
+                     float depthFactor = distFromSurface > 0 ? Clamp((float)distFromSurface / 40.0f, 0.0f, 1.0f) : 0.0f;
                      float surfaceThreshold = noiseThreshold - (1.0f - depthFactor) * caveSurfaceBias;
+                     surfaceThreshold = Clamp(surfaceThreshold, 0.0f, 1.0f);
                      
                      // Carve caves based on noise across the full world so they can overlap the surface
-                     if (caveNoise[r * WORLD_COLS + c] > surfaceThreshold)
+                     if (caveNoise[idx] > surfaceThreshold)
                      {
-                         canBeCave[r * WORLD_COLS + c] = true;
+                         canBeCave[idx] = true;
                      }
                  }
              }
              
              // Cellular automata smoothing for organic connectivity
-             int smoothIterations = Clamp(caveSmoothIterations, 1, 12);
+             int smoothIterations = Clamp(caveSmoothIterations, 1, 5);  // Reduced max from 12 to 5 for performance
              
              for (int iter = 0; iter < smoothIterations; ++iter)
              {
@@ -274,6 +282,9 @@ class TileMap
                  {
                      for (int c = 0; c < WORLD_COLS; ++c)
                      {
+                         int idx = r * WORLD_COLS + c;
+                         if (idx < 0 || idx >= (int)canBeCave.size()) continue;
+                         
                          // Check 8 neighbors (Moore neighborhood)
                          int caveCount = 0;
                          for (int dy = -1; dy <= 1; ++dy)
@@ -288,18 +299,22 @@ class TileMap
                                  if (nc < 0) nc += WORLD_COLS;
                                  if (nc >= WORLD_COLS) nc -= WORLD_COLS;
                                  
-                                 if (nr >= 0 && nr < WORLD_ROWS && canBeCave[nr * WORLD_COLS + nc])
-                                     caveCount++;
+                                 if (nr >= 0 && nr < WORLD_ROWS)
+                                 {
+                                     int neighborIdx = nr * WORLD_COLS + nc;
+                                     if (neighborIdx >= 0 && neighborIdx < (int)canBeCave.size() && canBeCave[neighborIdx])
+                                         caveCount++;
+                                 }
                              }
                          }
                          
-                         bool isCave = canBeCave[r * WORLD_COLS + c];
+                         bool isCave = canBeCave[idx];
                          
                          // Cave rules for connectivity and erosion
                          if (!isCave && caveCount >= 5)
-                             newState[r * WORLD_COLS + c] = true;
+                             newState[idx] = true;
                          else if (isCave && caveCount <= 2)
-                             newState[r * WORLD_COLS + c] = false;
+                             newState[idx] = false;
                      }
                  }
                  
@@ -311,7 +326,8 @@ class TileMap
              {
                  for (int c = 0; c < WORLD_COLS; ++c)
                  {
-                     if (canBeCave[r * WORLD_COLS + c])
+                     int idx = r * WORLD_COLS + c;
+                     if (idx >= 0 && idx < (int)canBeCave.size() && canBeCave[idx])
                      {
                          tileAt(c, r).solid = false;
                      }
@@ -320,11 +336,15 @@ class TileMap
              
              // Add some small isolated caves for variety
              int numIsolatedCaves = (int)(20 * caveDensity);
+             numIsolatedCaves = Clamp(numIsolatedCaves, 1, 100);  // Cap to prevent excessive processing
              
              for (int cave = 0; cave < numIsolatedCaves; ++cave)
              {
                  int caveX = rng() % WORLD_COLS;
-                 int caveY = caveBoundary + (rng() % (WORLD_ROWS - caveBoundary - 50));
+                 int caveMaxY = WORLD_ROWS - 100;  // Leave buffer at bottom
+                 if (caveMaxY <= caveBoundary) caveMaxY = caveBoundary + 50;
+                 int caveY = caveBoundary + (rng() % (caveMaxY - caveBoundary));
+                 caveY = Clamp(caveY, caveBoundary, WORLD_ROWS - 10);
                  int caveRadius = 2 + (rng() % 4);
                  
                  // Carve an organic-looking cave
@@ -340,11 +360,17 @@ class TileMap
                                  int cx = caveX + dx;
                                  int cy = caveY + dy;
                                  
+                                 // Wrap X (world is cyclical horizontally)
                                  if (cx < 0) cx += WORLD_COLS;
                                  if (cx >= WORLD_COLS) cx -= WORLD_COLS;
                                  
-                                 if (cy >= 0 && cy < WORLD_ROWS && cy > height[cx] + 5)
-                                     tileAt(cx, cy).solid = false;
+                                 // Bounds check Y and only carve deep caves
+                                 if (cy >= 0 && cy < WORLD_ROWS && inBounds(cx, cy))
+                                 {
+                                     int surfaceHeight = height[cx];
+                                     if (cy > surfaceHeight + 5)
+                                         tileAt(cx, cy).solid = false;
+                                 }
                              }
                          }
                      }
@@ -388,6 +414,10 @@ class Player
         float x_friction;
         float x_max_vel, y_max_vel;
         bool canJump;
+        
+        // Survival mode stats
+        int hp = 100;
+        int maxHp = 100;
 
         Vector2 updated_pos(float dt)
         {
@@ -408,6 +438,52 @@ class Player
         }
 
         // Border checking removed — world is now virtually unbounded (large world)
+};
+
+// ===== INVENTORY =====
+
+class Inventory
+{
+    public:
+        static const int NUM_SLOTS = 9;
+        
+        int blockCounts[NUM_SLOTS] = {0};  // 0-7 are block types, 8 unused
+        int selectedSlot = 0;
+        
+        Inventory()
+        {
+            // Start with some blocks
+            blockCounts[0] = 64;  // Dirt
+            blockCounts[1] = 32;  // Stone
+        }
+        
+        void addBlock(int blockType, int count = 1)
+        {
+            if (blockType >= 0 && blockType < NUM_SLOTS)
+                blockCounts[blockType] += count;
+        }
+        
+        bool removeBlock(int blockType, int count = 1)
+        {
+            if (blockType >= 0 && blockType < NUM_SLOTS && blockCounts[blockType] >= count)
+            {
+                blockCounts[blockType] -= count;
+                return true;
+            }
+            return false;
+        }
+        
+        int getBlockCount(int blockType)
+        {
+            if (blockType >= 0 && blockType < NUM_SLOTS)
+                return blockCounts[blockType];
+            return 0;
+        }
+        
+        int getSelectedBlockType()
+        {
+            return selectedSlot;
+        }
 };
 
 // ===== MAKER MODE =====
@@ -554,35 +630,64 @@ class Make
             }
         }
 
-        // Draw block type menu in screen space
+        // Draw block type menu in screen space with mouse support
         void drawMenu() const
         {
             int scrW = 1920, scrH = 1080;
-            int menuW = 400, menuH = 200;
+            int menuW = 450, menuH = 280;
             int x = (scrW - menuW) / 2;
             int y = (scrH - menuH) / 2;
+            
+            Vector2 mousePos = GetMousePosition();
 
-            DrawRectangle(x, y, menuW, menuH, Fade(BLACK, 0.8f));
-            DrawRectangleLinesEx({(float)x, (float)y, (float)menuW, (float)menuH}, 2, WHITE);
+            DrawRectangle(x, y, menuW, menuH, Fade(BLACK, 0.85f));
+            DrawRectangleLinesEx({(float)x, (float)y, (float)menuW, (float)menuH}, 3, YELLOW);
 
-            DrawText("BLOCK TYPE (1-3 or Click)", x + 20, y + 20, 20, YELLOW);
-
+            DrawText("BLOCK TYPE SELECTION", x + 20, y + 15, 22, YELLOW);
+            DrawText("Click or press 1-3, B to close", x + 20, y + 50, 14, DARKGRAY);
+            
+            int optY = y + 85;
+            const int optH = 50;
+            const int optSpacing = 60;
+            
             // Option 1: Dirt
+            Rectangle opt1 = {(float)(x + 20), (float)optY, (float)(menuW - 40), (float)optH};
+            bool hov1 = CheckCollisionPointRec(mousePos, opt1);
+            if (hov1) DrawRectangle(x + 20, optY, menuW - 40, optH, Fade(BROWN, 0.3f));
+            DrawRectangleLinesEx(opt1, hov1 ? 2 : 1, (blockType == 0) ? YELLOW : (hov1 ? WHITE : GRAY));
+            if (hov1 && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) ((Make*)this)->blockType = 0;
+            
             Color c1 = (blockType == 0) ? YELLOW : WHITE;
-            DrawText("1. Dirt", x + 40, y + 60, 20, c1);
-            DrawRectangle(x + 250, y + 60, 30, 20, BROWN);
-
+            DrawText("1. DIRT", x + 40, optY + 12, 18, c1);
+            DrawRectangle(x + menuW - 70, optY + 10, 40, 30, BROWN);
+            DrawRectangleLinesEx({(float)(x + menuW - 70), (float)(optY + 10), 40.0f, 30.0f}, 1, WHITE);
+            
+            optY += optSpacing;
+            
             // Option 2: Stone
+            Rectangle opt2 = {(float)(x + 20), (float)optY, (float)(menuW - 40), (float)optH};
+            bool hov2 = CheckCollisionPointRec(mousePos, opt2);
+            if (hov2) DrawRectangle(x + 20, optY, menuW - 40, optH, Fade(GRAY, 0.3f));
+            DrawRectangleLinesEx(opt2, hov2 ? 2 : 1, (blockType == 1) ? YELLOW : (hov2 ? WHITE : GRAY));
+            if (hov2 && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) ((Make*)this)->blockType = 1;
+            
             Color c2 = (blockType == 1) ? YELLOW : WHITE;
-            DrawText("2. Stone", x + 40, y + 100, 20, c2);
-            DrawRectangle(x + 250, y + 100, 30, 20, GRAY);
-
+            DrawText("2. STONE", x + 40, optY + 12, 18, c2);
+            DrawRectangle(x + menuW - 70, optY + 10, 40, 30, GRAY);
+            DrawRectangleLinesEx({(float)(x + menuW - 70), (float)(optY + 10), 40.0f, 30.0f}, 1, WHITE);
+            
+            optY += optSpacing;
+            
             // Option 3: Erase
+            Rectangle opt3 = {(float)(x + 20), (float)optY, (float)(menuW - 40), (float)optH};
+            bool hov3 = CheckCollisionPointRec(mousePos, opt3);
+            if (hov3) DrawRectangle(x + 20, optY, menuW - 40, optH, Fade(RED, 0.2f));
+            DrawRectangleLinesEx(opt3, hov3 ? 2 : 1, (blockType == 2) ? YELLOW : (hov3 ? WHITE : GRAY));
+            if (hov3 && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) ((Make*)this)->blockType = 2;
+            
             Color c3 = (blockType == 2) ? YELLOW : WHITE;
-            DrawText("3. Erase", x + 40, y + 140, 20, c3);
-            DrawRectangle(x + 250, y + 140, 30, 20, BLACK);
-            DrawRectangleLinesEx({x + 250.0f, y + 140.0f, 30.0f, 20.0f}, 1, WHITE);
-
-            DrawText("Press B to close", x + 20, y + 170, 16, DARKGRAY);
+            DrawText("3. ERASE", x + 40, optY + 12, 18, c3);
+            DrawRectangle(x + menuW - 70, optY + 10, 40, 30, BLACK);
+            DrawRectangleLinesEx({(float)(x + menuW - 70), (float)(optY + 10), 40.0f, 30.0f}, 2, RED);
         }
 };

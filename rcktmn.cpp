@@ -14,10 +14,11 @@ const int fpsMax    = 60;
 const int MAX_SLOTS = 5;
 
 // Camera zoom limits
-// 1.0 = zoomed out (current full view), 3.0 = zoomed in (3x)
-const float ZOOM_MIN  = 1.0f;
-const float ZOOM_MAX  = 3.0f;
-const float ZOOM_STEP = 0.15f;
+// ZOOM_MIN calculated: screen dimensions / world dimensions
+// 1920 / 40960 ≈ 0.047, but we want some margin, so 0.045
+const float ZOOM_MIN  = 0.048f;  // See entire 2048x2048 map
+const float ZOOM_MAX  = 3.0f;    // Zoomed in 3x
+const float ZOOM_STEP = 0.08f;   // Smoother zoom increments
 
 // Player movement constants
 const float HORIZONTAL_MOVE_SPEED = 0.85f;
@@ -57,7 +58,11 @@ void saveLevelToSlot(const TileMap& tileMap, const Player& player, int slot)
     for (int r = 0; r < WORLD_ROWS; r++)
         for (int c = 0; c < WORLD_COLS; c++)
             if (tileMap.isSolid(c, r))
-                saveFile << c << " " << r << "\n";
+            {
+                const Tile& t = tileMap.tileAt(c, r);
+                // Save: col row r g b a
+                saveFile << c << " " << r << " " << (int)t.color.r << " " << (int)t.color.g << " " << (int)t.color.b << " " << (int)t.color.a << "\n";
+            }
 
     saveFile.close();
 }
@@ -78,10 +83,21 @@ bool loadLevelFromSlot(TileMap& tileMap, Player& player, int slot)
     player.canJump = false;
     tileMap.clear();
 
-    int col, row;
+    int col, row, r, g, b, a;
     while (loadFile >> col >> row)
+    {
+        // Try to read color values (new format) or default to WHITE (old format)
+        if (!(loadFile >> r >> g >> b >> a))
+        {
+            r = 255; g = 255; b = 255; a = 255;
+        }
+        
         if (tileMap.inBounds(col, row))
-            tileMap.tileAt(col, row) = {true, WHITE};
+        {
+            Color blockColor = {(unsigned char)r, (unsigned char)g, (unsigned char)b, (unsigned char)a};
+            tileMap.tileAt(col, row) = {true, blockColor};
+        }
+    }
 
     loadFile.close();
     return true;
@@ -254,6 +270,7 @@ int main()
             }
 
             // Start generation on Enter
+            if (IsKeyPressed(KEY_ENTER))
             {
                 if (seedInput.empty())
                 {
@@ -267,6 +284,7 @@ int main()
                 }
                 gameState = PREVIEW;
                 tileMap.generate(seedVal, surfaceHeight, surfaceRoughness, caveDensity, caveThreshold, caveSurfaceBias, caveSmoothIterations);
+                tileMap.generateClouds(seedVal, player.pos);
                 previewGenerated = true;
             }
 
@@ -417,6 +435,7 @@ int main()
             if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, regenBtn))
             {
                 tileMap.generate(seedVal, surfaceHeight, surfaceRoughness, caveDensity, caveThreshold, caveSurfaceBias, caveSmoothIterations);
+                tileMap.generateClouds(seedVal, player.pos);
                 previewGenerated = true;
             }
             
@@ -424,6 +443,7 @@ int main()
             if (IsKeyPressed(KEY_R))
             {
                 tileMap.generate(seedVal, surfaceHeight, surfaceRoughness, caveDensity, caveThreshold, caveSurfaceBias, caveSmoothIterations);
+                tileMap.generateClouds(seedVal, player.pos);
                 previewGenerated = true;
             }
 
@@ -471,11 +491,7 @@ int main()
         if (wheel != 0.0f)
         {
             camera.zoom += wheel * ZOOM_STEP;
-            float makerZoomMin = (float)scrWidth / (float)worldWidth;
-            float makerZoomMinY = (float)scrHeight / (float)worldHeight;
-            makerZoomMin = (makerZoomMin < makerZoomMinY) ? makerZoomMin : makerZoomMinY;
-            float zoomMin = makerMode ? makerZoomMin : ZOOM_MIN;
-            camera.zoom  = Clamp(camera.zoom, zoomMin, ZOOM_MAX);
+            camera.zoom = Clamp(camera.zoom, ZOOM_MIN, ZOOM_MAX);
         }
 
         // World-space mouse position (needed for maker mode under any zoom level)
@@ -606,9 +622,36 @@ int main()
             if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_M))
             {
                 makerMode = !makerMode;
-                consoleMessages.push_back(makerMode
-                    ? Message{2.0f, "MAKER MODE ON  B:BLOCKS  L:DRAG  R:ERASE  CTRL-M:OFF", WHITE}
-                    : Message{1.0f, "MAKER MODE OFF", WHITE});
+                if (makerMode)
+                {
+                    player.flying = true;
+                    player.flyVelY = 0.0f;
+                    consoleMessages.push_back(Message{2.0f, "MAKER MODE ON  B:BLOCKS  L:DRAG  R:ERASE  CTRL-M:OFF", WHITE});
+                }
+                else
+                {
+                    player.flying = false;
+                    consoleMessages.push_back(Message{1.0f, "MAKER MODE OFF", WHITE});
+                }
+            }
+
+            // Creative flight controls (only in maker mode)
+            if (makerMode && player.flying)
+            {
+                float flyAccel = 8.0f;  // Flight acceleration
+                if (IsKeyDown(KEY_W))
+                {
+                    player.flyVelY -= flyAccel;  // Negative Y = up
+                }
+                if (IsKeyDown(KEY_S))
+                {
+                    player.flyVelY += flyAccel;  // Positive Y = down
+                }
+                // Natural deceleration when not pressing fly keys
+                if (!IsKeyDown(KEY_W) && !IsKeyDown(KEY_S))
+                {
+                    player.flyVelY *= 0.95f;  // Smooth deceleration
+                }
             }
 
             // Block type hotkeys (only in maker mode, when menu not open)
@@ -667,10 +710,8 @@ int main()
         // Camera follows the player in normal play; maker mode can zoom all the way out to a full-map overview
         if (makerMode)
         {
-            float makerZoomMin = (float)scrWidth / (float)worldWidth;
-            float makerZoomMinY = (float)scrHeight / (float)worldHeight;
-            makerZoomMin = (makerZoomMin < makerZoomMinY) ? makerZoomMin : makerZoomMinY;
-            if (camera.zoom <= makerZoomMin + 0.0001f)
+            // At minimum zoom, center on world; otherwise follow player
+            if (camera.zoom <= ZOOM_MIN + 0.001f)
                 camera.target = {(float)worldWidth * 0.5f, (float)worldHeight * 0.5f};
             else
                 camera.target = player.pos;
@@ -679,6 +720,12 @@ int main()
         {
             camera.target = player.pos;
         }
+        
+        // Clamp camera to world bounds
+        float camWidth = (float)scrWidth / camera.zoom;
+        float camHeight = (float)scrHeight / camera.zoom;
+        camera.target.x = Clamp(camera.target.x, camWidth * 0.5f, (float)worldWidth - camWidth * 0.5f);
+        camera.target.y = Clamp(camera.target.y, camHeight * 0.5f, (float)worldHeight - camHeight * 0.5f);
 
         // ----- RENDERING -----
         BeginDrawing();

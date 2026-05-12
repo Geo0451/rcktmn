@@ -5,179 +5,30 @@
 #include <string>
 #include <random>
 #include <raylib.h>
-#include "rckheaders.cpp"
 
-// ===== CONFIGURATION =====
-const int scrWidth  = 1920;
-const int scrHeight = 1080;
-const int fpsMax    = 60;
-const int MAX_SLOTS = 5;
+#include "src/constants.h"
+#include "src/ui.h"
+#include "src/tilemap.h"
+#include "src/player.h"
+#include "src/maker.h"
+#include "src/gameplay.h"
 
-// Camera zoom limits
-// ZOOM_MIN calculated: screen dimensions / world dimensions
-// 1920 / 40960 ≈ 0.047, but we want some margin, so 0.045
-const float ZOOM_MIN  = 0.048f;  // See entire 2048x2048 map
-const float ZOOM_MAX  = 3.0f;    // Zoomed in 3x
-const float ZOOM_STEP = 0.08f;   // Smoother zoom increments
+// Local configuration
+const int scrWidth  = SCREEN_WIDTH;
+const int scrHeight = SCREEN_HEIGHT;
+const int fpsMax    = FPS_MAX;
+const int MAX_SLOTS = MAX_SAVE_SLOTS;
 
-// Player movement constants
-const float HORIZONTAL_MOVE_SPEED = 0.85f;
-const float VERTICAL_MOVE_SPEED   = 0.8f;
-const float JUMP_MULTIPLIER       = 4.0f;
-const float GRAVITY               = 0.1f;
+// Helper: Clamp function (if not available from raylib)
+template<typename T>
+T Clamp(T value, T min_val, T max_val) {
+    return (value < min_val) ? min_val : (value > max_val) ? max_val : value;
+}
 
 // World dimensions in pixels
 const int worldWidth  = WORLD_COLS * TILE_SIZE;
 const int worldHeight = WORLD_ROWS * TILE_SIZE;
 
-// ===== HELPER FUNCTIONS =====
-
-void handlePlayerInput(Player& player)
-{
-    if (IsKeyDown(KEY_A)) player.dir.x -= HORIZONTAL_MOVE_SPEED;
-    if (IsKeyDown(KEY_D)) player.dir.x += HORIZONTAL_MOVE_SPEED;
-    if (IsKeyDown(KEY_S)) player.dir.y += VERTICAL_MOVE_SPEED;
-
-    // Hold space for auto-jump when grounded
-    if (IsKeyDown(KEY_SPACE) && player.canJump)
-        player.dir.y -= VERTICAL_MOVE_SPEED * JUMP_MULTIPLIER;
-
-    // Single impulse jump fallback
-    if (IsKeyPressed(KEY_W) && player.canJump)
-        player.dir.y -= VERTICAL_MOVE_SPEED * JUMP_MULTIPLIER;
-}
-
-void saveLevelToSlot(const TileMap& tileMap, const Player& player, int slot)
-{
-    std::string filename = "sf_" + std::to_string(slot) + ".dat";
-    std::ofstream saveFile(filename);
-    if (!saveFile.is_open()) return;
-
-    saveFile << player.pos.x << " " << player.pos.y << "\n";
-
-    for (int r = 0; r < WORLD_ROWS; r++)
-        for (int c = 0; c < WORLD_COLS; c++)
-            if (tileMap.isSolid(c, r))
-            {
-                const Tile& t = tileMap.tileAt(c, r);
-                // Save: col row r g b a
-                saveFile << c << " " << r << " " << (int)t.color.r << " " << (int)t.color.g << " " << (int)t.color.b << " " << (int)t.color.a << "\n";
-            }
-
-    saveFile.close();
-}
-
-bool loadLevelFromSlot(TileMap& tileMap, Player& player, int slot)
-{
-    std::string filename = "sf_" + std::to_string(slot) + ".dat";
-    std::ifstream loadFile(filename);
-    if (!loadFile.is_open()) return false;
-
-    if (!(loadFile >> player.pos.x >> player.pos.y))
-    {
-        loadFile.close();
-        return false;
-    }
-
-    player.dir    = {0, 0};
-    player.canJump = false;
-    tileMap.clear();
-
-    int col, row, r, g, b, a;
-    while (loadFile >> col >> row)
-    {
-        // Try to read color values (new format) or default to WHITE (old format)
-        if (!(loadFile >> r >> g >> b >> a))
-        {
-            r = 255; g = 255; b = 255; a = 255;
-        }
-        
-        if (tileMap.inBounds(col, row))
-        {
-            Color blockColor = {(unsigned char)r, (unsigned char)g, (unsigned char)b, (unsigned char)a};
-            tileMap.tileAt(col, row) = {true, blockColor};
-        }
-    }
-
-    loadFile.close();
-    return true;
-}
-
-// O(1) tile-based collision - only checks the tiles the bounding box overlaps
-void handleCollisions(Player& player, const Vector2& nextPosition, const TileMap& tileMap)
-{
-    player.pos    = nextPosition;
-    player.canJump = false;
-
-    int left   = (int)(player.pos.x - player.size) / TILE_SIZE;
-    int right  = (int)(player.pos.x + player.size) / TILE_SIZE;
-    int top    = (int)(player.pos.y - player.size) / TILE_SIZE;
-    int bottom = (int)(player.pos.y + player.size) / TILE_SIZE;
-
-    for (int row = top; row <= bottom; row++)
-    {
-        for (int col = left; col <= right; col++)
-        {
-            if (!tileMap.isSolid(col, row)) continue;
-
-            Rectangle playerBB = {
-                player.pos.x - player.size,
-                player.pos.y - player.size,
-                player.size * 2,
-                player.size * 2
-            };
-
-            Rectangle tileRect = tileMap.getTileRect(col, row);
-            if (!CheckCollisionRecs(playerBB, tileRect)) continue;
-
-            Rectangle overlap = GetCollisionRec(playerBB, tileRect);
-
-            if (overlap.width > overlap.height) // Floor / ceiling
-            {
-                player.dir.y = 0;
-                float tileMidY = tileRect.y + tileRect.height * 0.5f;
-                if (player.pos.y < tileMidY)
-                {
-                    player.pos.y -= overlap.height;
-                    player.canJump = true;
-                }
-                else
-                {
-                    player.pos.y += overlap.height;
-                }
-            }
-            else // Left / right wall
-            {
-                player.dir.x = 0;
-                float tileMidX = tileRect.x + tileRect.width * 0.5f;
-                if (player.pos.x < tileMidX)
-                    player.pos.x -= overlap.width;
-                else
-                    player.pos.x += overlap.width;
-            }
-        }
-    }
-}
-
-void drawConsoleMessages(std::vector<Message>& messages)
-{
-    if (messages.empty()) return;
-
-    for (int i = 0; i < (int)messages.size(); i++)
-    {
-        Message* msg = &messages[i];
-        DrawText(msg->content.c_str(), 10, 10 + (i * 30), 20, msg->color);
-
-        msg->lifetime -= 1.0f / fpsMax;
-        if (msg->lifetime < 0)
-        {
-            messages.erase(messages.begin() + i);
-            i--;
-        }
-    }
-}
-
-// ===== MAIN GAME LOOP =====
 int main()
 {
     srand(5894);
@@ -523,59 +374,49 @@ int main()
                 miningHeldTime = 0.0f;
             }
             
-            // Survival mode: mining/placing mechanics
+            // Survival mode: hold-to-mine controls
+            // - LMB hold to mine with progress overlay; breaks when timer reaches MINING_TIME_REQUIRED
+            // - RMB places the selected block only if the player has blocks in selected slot
             if (!makerMode && !showInventory)
             {
-                if (survivalState == MINING)
+                // Left click hold: accumulate mining time
+                if (IsMouseButtonDown(MOUSE_BUTTON_LEFT))
                 {
-                    // Hold left click to mine
-                    if (IsMouseButtonDown(MOUSE_BUTTON_LEFT))
-                    {
-                        miningHeldTime += deltaTime;
-                        
-                        if (miningHeldTime >= MINING_TIME_REQUIRED)
-                        {
-                            // Mine the block
-                            int tx = (int)worldMouse.x / TILE_SIZE;
-                            int ty = (int)worldMouse.y / TILE_SIZE;
-                            
-                            if (tileMap.inBounds(tx, ty) && tileMap.isSolid(tx, ty))
-                            {
-                                int blockType = 0;  // Determine block type from color
-                                Tile& tile = tileMap.tileAt(tx, ty);
-                                if (tile.color.r == 100)  // Approximation for stone (GRAY)
-                                    blockType = 1;
-                                
-                                tileMap.tileAt(tx, ty).solid = false;
-                                inventory.addBlock(blockType, 1);
-                                consoleMessages.push_back({1.0f, "MINED BLOCK", YELLOW});
-                                miningHeldTime = 0.0f;  // Reset for next mine
-                            }
-                        }
-                    }
-                    else
-                    {
-                        miningHeldTime = 0.0f;
-                    }
-                    
-                    // Right click to enter placement mode
-                    if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT))
-                    {
-                        if (inventory.getBlockCount(inventory.selectedSlot) > 0)
-                        {
-                            survivalState = PLACING;
-                        }
-                    }
-                }
-                else if (survivalState == PLACING)
-                {
-                    // Left click to place block
-                    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+                    miningHeldTime += deltaTime;
+
+                    // Break the block once mining is complete
+                    if (miningHeldTime >= MINING_TIME_REQUIRED)
                     {
                         int tx = (int)worldMouse.x / TILE_SIZE;
                         int ty = (int)worldMouse.y / TILE_SIZE;
-                        
-                        if (tileMap.inBounds(tx, ty) && !tileMap.isSolid(tx, ty))
+
+                        if (tileMap.inBounds(tx, ty) && tileMap.isSolid(tx, ty))
+                        {
+                            int blockType = 0; // determine by color
+                            Tile& tile = tileMap.tileAt(tx, ty);
+                            if (tile.color.r == 100) blockType = 1; // stone heuristic
+
+                            tileMap.tileAt(tx, ty).solid = false;
+                            inventory.addBlock(blockType, 1);
+                            consoleMessages.push_back({1.0f, "MINED BLOCK", YELLOW});
+                            miningHeldTime = 0.0f;  // Reset for next mine
+                        }
+                    }
+                }
+                else
+                {
+                    miningHeldTime = 0.0f;  // Reset when mouse is released
+                }
+
+                // Right click: place selected block if we have any in the selected slot
+                if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT))
+                {
+                    int tx = (int)worldMouse.x / TILE_SIZE;
+                    int ty = (int)worldMouse.y / TILE_SIZE;
+
+                    if (tileMap.inBounds(tx, ty) && !tileMap.isSolid(tx, ty))
+                    {
+                        if (inventory.getBlockCount(inventory.selectedSlot) > 0)
                         {
                             if (inventory.removeBlock(inventory.selectedSlot, 1))
                             {
@@ -585,15 +426,12 @@ int main()
                             }
                         }
                     }
-                    
-                    // Number keys to select slot in placement mode
-                    for (int i = 0; i < 9; i++)
-                    {
-                        if (IsKeyPressed(KEY_ONE + i))
-                        {
-                            inventory.selectedSlot = i;
-                        }
-                    }
+                }
+
+                // Number keys to select slot
+                for (int i = 0; i < 9; i++)
+                {
+                    if (IsKeyPressed(KEY_ONE + i)) inventory.selectedSlot = i;
                 }
             }
 
@@ -728,6 +566,10 @@ int main()
         camera.target.y = Clamp(camera.target.y, camHeight * 0.5f, (float)worldHeight - camHeight * 0.5f);
 
         // ----- RENDERING -----
+        // Precompute player color (HP indicator) so we can draw player inside world space
+        float hpPct_draw = Clamp((float)player.hp / (float)player.maxHp, 0.0f, 1.0f);
+        Color playerColor_draw = {(unsigned char)(hpPct_draw * 255.0f), 0, 0, 255};
+
         BeginDrawing();
         ClearBackground(BLACK);
 
@@ -738,7 +580,7 @@ int main()
 
             if (makerMode && !tileMaker.showMenu)
                 tileMaker.drawPreview(worldMouse);
-            
+
             // Survival mode: show tile cursor
             if (!makerMode && !showInventory)
             {
@@ -758,6 +600,18 @@ int main()
                         // Show mining cursor (green for solid, faded for empty)
                         bool isSolid = tileMap.isSolid(hc, hr);
                         DrawRectangleLinesEx(hover, 2, isSolid ? GREEN : Fade(GREEN, 0.3f));
+
+                        // If player is mining, overlay progress directly on the block like Minecraft
+                        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && isSolid)
+                        {
+                            float progress = Clamp(miningHeldTime / MINING_TIME_REQUIRED, 0.0f, 1.0f);
+                            // Semi-transparent white overlay scaled by progress
+                            DrawRectangle((int)hover.x, (int)hover.y, (int)hover.width, (int)hover.height, Fade(WHITE, 0.2f + 0.6f * progress));
+                            // Draw simple crack lines whose alpha increases with progress
+                            Color crack = Fade(BLACK, progress);
+                            DrawLine((int)hover.x, (int)hover.y, (int)(hover.x + hover.width), (int)(hover.y + hover.height), crack);
+                            DrawLine((int)(hover.x + hover.width), (int)hover.y, (int)hover.x, (int)(hover.y + hover.height), crack);
+                        }
                     }
                     else if (survivalState == PLACING)
                     {
@@ -773,7 +627,8 @@ int main()
                 }
             }
 
-            DrawCircleV(player.pos, player.size, player.clr);
+            // Draw player in world space with HP-indicated color
+            DrawCircleV(player.pos, player.size, playerColor_draw);
 
         EndMode2D();
 
@@ -785,128 +640,78 @@ int main()
         snprintf(zoomText, sizeof(zoomText), "ZOOM %.1fx", camera.zoom);
         DrawText(zoomText, scrWidth - 100, scrHeight - 40, 16, DARKGRAY);
 
-        drawConsoleMessages(consoleMessages);
+        drawConsoleMessages(consoleMessages, fpsMax);
 
         // === SURVIVAL MODE HUD ===
         if (!makerMode)
         {
-            // Draw HP bar
-            int hpBarW = 200;
-            int hpBarH = 25;
-            int hpBarX = 20;
-            int hpBarY = 20;
-            
-            DrawRectangle(hpBarX, hpBarY, hpBarW, hpBarH, {139, 0, 0, 255});
-            float hpPercent = (float)player.hp / (float)player.maxHp;
-            DrawRectangle(hpBarX, hpBarY, (int)(hpBarW * hpPercent), hpBarH, RED);
-            DrawRectangleLinesEx({(float)hpBarX, (float)hpBarY, (float)hpBarW, (float)hpBarH}, 2, WHITE);
-            DrawText(TextFormat("HP: %d/%d", player.hp, player.maxHp), hpBarX + 10, hpBarY + 4, 16, WHITE);
-            
-            // Draw selected slot and mining progress
-            if (!showInventory)
-            {
-                int slotX = 20;
-                int slotY = scrHeight - 140;
-                
-                // Mining progress indicator
-                if (survivalState == MINING && IsMouseButtonDown(MOUSE_BUTTON_LEFT))
-                {
-                    float progress = miningHeldTime / MINING_TIME_REQUIRED;
-                    progress = Clamp(progress, 0.0f, 1.0f);
-                    
-                    int barW = 150;
-                    int barH = 15;
-                    DrawRectangle(slotX, slotY - 30, barW, barH, Fade(DARKGRAY, 0.5f));
-                    DrawRectangleLinesEx({(float)slotX, (float)(slotY - 30), (float)barW, (float)barH}, 2, YELLOW);
-                    DrawRectangle(slotX + 1, slotY - 29, (int)((barW - 2) * progress), barH - 2, ORANGE);
-                    DrawText("Mining...", slotX, slotY - 50, 14, YELLOW);
-                    DrawText(TextFormat("%.1f%%", progress * 100), slotX + 160, slotY - 36, 12, ORANGE);
-                }
-                
-                // Selected slot display and preview
-                if (survivalState == PLACING)
-                {
-                    DrawText("PLACEMENT MODE - ESC to cancel", slotX, slotY - 10, 16, {100, 255, 100, 255});
-                    
-                    // Block preview box
-                    Color previewColor = (inventory.selectedSlot == 0) ? BROWN : GRAY;
-                    int previewSize = 50;
-                    DrawRectangle(slotX, slotY + 20, previewSize, previewSize, previewColor);
-                    DrawRectangleLinesEx({(float)slotX, (float)(slotY + 20), (float)previewSize, (float)previewSize}, 2, YELLOW);
-                    
-                    DrawText(TextFormat("Block %d", inventory.selectedSlot + 1), slotX + previewSize + 20, slotY + 30, 14, WHITE);
-                    DrawText(TextFormat("Count: %d", inventory.getBlockCount(inventory.selectedSlot)), slotX + previewSize + 20, slotY + 50, 12, YELLOW);
-                }
-            }
-            
-            // Draw inventory screen (TAB)
+            // Player color now indicates HP: interpolate between BLACK (0) and RED (max)
+            float hpPct = Clamp((float)player.hp / (float)player.maxHp, 0.0f, 1.0f);
+            Color playerColor = {(unsigned char)(hpPct * 255.0f), 0, 0, 255};
+
+            // Draw inventory grid or HUD-less overlay modes
             if (showInventory)
             {
-                int invW = 500;
-                int invH = 410;
+                int invW = 420;
+                int invH = 420;
                 int invX = (scrWidth - invW) / 2;
                 int invY = (scrHeight - invH) / 2;
-                
+
                 DrawRectangle(invX, invY, invW, invH, Fade(BLACK, 0.85f));
                 DrawRectangleLinesEx({(float)invX, (float)invY, (float)invW, (float)invH}, 3, YELLOW);
-                
-                DrawText("INVENTORY", invX + 20, invY + 15, 26, YELLOW);
-                DrawText("Click or press 1-9 to select", invX + 20, invY + 50, 13, DARKGRAY);
-                
+                DrawText("INVENTORY", invX + 20, invY + 12, 26, YELLOW);
+                DrawText("Click or press 1-9 to select", invX + 20, invY + 44, 13, DARKGRAY);
+
+                // 3x3 grid
+                const int cols = 3;
+                const int rows = 3;
+                const int slotSize = 100;
+                const int padding = 16;
+                int gridW = cols * slotSize + (cols - 1) * padding;
+                int startX = invX + (invW - gridW) / 2;
+                int startY = invY + 80;
+
                 Vector2 mousePos = GetMousePosition();
-                int itemY = invY + 85;
-                for (int i = 0; i < Inventory::NUM_SLOTS; i++)
+                for (int idx = 0; idx < Inventory::NUM_SLOTS; ++idx)
                 {
-                    const char* itemName = "";
-                    Color itemColor = WHITE;
-                    
-                    if (i == 0)
-                    {
-                        itemName = "Dirt";
-                        itemColor = BROWN;
-                    }
-                    else if (i == 1)
-                    {
-                        itemName = "Stone";
-                        itemColor = GRAY;
-                    }
-                    else
-                    {
-                        itemName = "Empty";
-                        itemColor = DARKGRAY;
-                    }
-                    
-                    Rectangle slotRect = {(float)(invX + 20), (float)itemY, 450.0f, 30.0f};
-                    bool isHovered = CheckCollisionPointRec(mousePos, slotRect);
-                    bool isSelected = (i == inventory.selectedSlot);
-                    
-                    Color slotBg = isSelected ? ORANGE : (isHovered ? Fade(WHITE, 0.2f) : DARKGRAY);
-                    Color borderColor = isSelected ? YELLOW : (isHovered ? WHITE : GRAY);
-                    DrawRectangle(invX + 20, itemY, 450, 30, slotBg);
-                    DrawRectangleLinesEx(slotRect, isSelected ? 2 : (isHovered ? 2 : 1), borderColor);
-                    
-                    // Click to select
-                    if (isHovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
-                    {
-                        inventory.selectedSlot = i;
-                    }
-                    
-                    DrawText(TextFormat("[%d]", i + 1), invX + 35, itemY + 7, 14, WHITE);
-                    DrawText(itemName, invX + 80, itemY + 7, 14, itemColor);
-                    DrawText(TextFormat("x%d", inventory.getBlockCount(i)), invX + 400, itemY + 7, 14, YELLOW);
-                    
-                    itemY += 35;
+                    int cx = idx % cols;
+                    int cy = idx / cols;
+                    int sx = startX + cx * (slotSize + padding);
+                    int sy = startY + cy * (slotSize + padding);
+
+                    Rectangle slotRect = {(float)sx, (float)sy, (float)slotSize, (float)slotSize};
+                    bool hovered = CheckCollisionPointRec(mousePos, slotRect);
+                    bool selected = (idx == inventory.selectedSlot);
+
+                    Color bg = selected ? Fade(ORANGE, 0.6f) : (hovered ? Fade(WHITE, 0.06f) : Fade(DARKGRAY, 0.2f));
+                    Color border = selected ? YELLOW : (hovered ? WHITE : GRAY);
+
+                    DrawRectangleRec(slotRect, bg);
+                    DrawRectangleLinesEx(slotRect, selected ? 3 : 2, border);
+
+                    // Slot content preview
+                    Color blockColor = DARKGRAY;
+                    const char* name = "Empty";
+                    if (idx == 0) { blockColor = BROWN; name = "Dirt"; }
+                    else if (idx == 1) { blockColor = GRAY; name = "Stone"; }
+
+                    int previewPad = 10;
+                    DrawRectangle(sx + previewPad, sy + previewPad, slotSize - previewPad*2, slotSize - previewPad*2 - 20, blockColor);
+                    DrawText(TextFormat("x%d", inventory.getBlockCount(idx)), sx + 6, sy + slotSize - 18, 14, YELLOW);
+
+                    if (hovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) inventory.selectedSlot = idx;
                 }
-                
+
                 DrawText("TAB to close", invX + 20, invY + invH - 25, 12, DARKGRAY);
             }
-            
-            // Help text at bottom
-            if (!showInventory)
+            else
             {
-                DrawText("TAB: Inventory | LMB: Mine | RMB: Place Mode (1-9: Select) | ESC: Cancel", 
-                         20, scrHeight - 30, 14, DARKGRAY);
+                // Minimal HUD: show help text only
+                DrawText("TAB: Inventory | LMB: Mine | RMB: Place Mode (1-9: Select) | ESC: Cancel", 20, scrHeight - 30, 14, DARKGRAY);
             }
+
+            // Draw the player circle with HP-indicative color (overrides stored player.clr)
+            DrawCircleV(player.pos, player.size, playerColor);
         }
         
         // === MAKER MODE HUD ===

@@ -9,8 +9,8 @@
 // ===== WORLD GRID CONSTANTS =====
 const int TILE_SIZE  = 20;   // Matches player diameter (radius 10 * 2)
 // World is 512x512 tiles (reasonable size for generation)
-const int WORLD_COLS = 512;  // World width  in tiles (10240px)
-const int WORLD_ROWS = 512;  // World height in tiles (10240px)
+const int WORLD_COLS = 2048;  // World width  in tiles (10240px)
+const int WORLD_ROWS = 2048;  // World height in tiles (10240px)
 
 // ===== MESSAGE =====
 
@@ -398,6 +398,69 @@ class TileMap
                             tileAt(c, r).color
                         );
         }
+        
+        void generateClouds(unsigned int seed, Vector2 spawnPos)
+        {
+            std::mt19937 rng(seed);
+            int cloudLayerY = 80;  // Generate clouds layer near the top
+            int spawnTileX = (int)spawnPos.x / TILE_SIZE;
+            int spawnTileY = (int)spawnPos.y / TILE_SIZE;
+            
+            // Create larger, more cohesive clouds using a streaming algorithm
+            int numCloudCenters = 8;
+            float cloudCoverage = 0.35f;  // 35% of sky covered
+            int tilesToProcess = WORLD_COLS * 30;  // Process 30 rows of clouds
+            
+            for (int centerIdx = 0; centerIdx < numCloudCenters; centerIdx++)
+            {
+                // Deterministic pseudo-random cloud center positions
+                std::mt19937 centerRng(seed + centerIdx * 12345);
+                int centerX = (centerRng() % WORLD_COLS);
+                int centerY = cloudLayerY + (centerRng() % 40);
+                
+                // Skip clouds too close to spawn
+                int distX = centerX - spawnTileX;
+                int distY = centerY - spawnTileY;
+                int distSq = distX * distX + distY * distY;
+                if (distSq < 10000) continue;  // 100^2 = 10000
+                
+                // Large cloud cluster: generate cloud body
+                int cloudWidth = 30 + (centerRng() % 40);  // 30-70 tiles wide
+                int cloudHeight = 15 + (centerRng() % 20);  // 15-35 tiles tall
+                
+                // Use simplex-like distribution: dense center, sparse edges
+                for (int y = -cloudHeight; y <= cloudHeight; y++)
+                {
+                    for (int x = -cloudWidth; x <= cloudWidth; x++)
+                    {
+                        int tileX = centerX + x;
+                        int tileY = centerY + y;
+                        
+                        if (!inBounds(tileX, tileY) || isSolid(tileX, tileY))
+                            continue;
+                        
+                        // Distance-based density: more dense near center, sparse at edges
+                        float distFromCenter = sqrt((float)(x*x + y*y*0.5f));  // Elliptical falloff
+                        float maxDist = sqrt((float)(cloudWidth*cloudWidth + cloudHeight*cloudHeight*0.5f));
+                        float density = 1.0f - (distFromCenter / maxDist);
+                        
+                        // Add some randomness but keep it efficient
+                        std::mt19937 tileRng(seed + tileX * 73856093U ^ tileY * 19349663U);
+                        float randomVal = (float)(tileRng() % 100) / 100.0f;
+                        
+                        // Threshold: higher threshold at edges (sparse), lower at center (dense)
+                        float threshold = 0.4f + (0.6f * (1.0f - density));
+                        
+                        if (randomVal < density * cloudCoverage)
+                        {
+                            // Draw cloud with slight semi-transparency fade at edges
+                            float alpha = 0.7f + (density * 0.3f);  // 0.7-1.0 alpha
+                            tileAt(tileX, tileY) = {true, Fade(WHITE, alpha)};
+                        }
+                    }
+                }
+            }
+        }
 };
 
 // ===== PLAYER =====
@@ -418,22 +481,38 @@ class Player
         // Survival mode stats
         int hp = 100;
         int maxHp = 100;
+        
+        // Maker mode flight
+        bool flying = false;
+        float flyVelY = 0.0f;
 
         Vector2 updated_pos(float dt)
         {
             dt *= 60;
 
             dir.x = Clamp(dir.x, -x_max_vel, +x_max_vel);
-            dir.y = Clamp(dir.y, -y_max_vel * 1.5f, +y_max_vel * 2.0f);
+            
+            // Flying mode: no gravity, direct vertical input
+            if (flying)
+            {
+                flyVelY = Clamp(flyVelY, -y_max_vel * 2.0f, y_max_vel * 2.0f);
+            }
+            else
+            {
+                // Normal gravity mode
+                dir.y = Clamp(dir.y, -y_max_vel * 1.5f, +y_max_vel * 2.0f);
+            }
 
             if (dir.x < 0.1f && dir.x > -0.1f)
                 dir.x = 0;
             else
                 dir.x = dir.x / x_friction;
 
+            float newY = pos.y + (flying ? flyVelY * speed * dt : dir.y * speed * dt);
+            
             return {
                 pos.x + (dir.x * speed * dt),
-                pos.y + (dir.y * speed * dt)
+                newY
             };
         }
 

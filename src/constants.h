@@ -7,8 +7,14 @@ const int FPS_MAX       = 60;
 
 // ===== WORLD & TILES =====
 const int TILE_SIZE   = 20;    // Pixel size per tile
-const int WORLD_COLS  = 2048;  // World width in tiles (40,960px)
-const int WORLD_ROWS  = 2048;  // World height in tiles (40,960px)
+// For web demo builds we use a much smaller world to fit Wasm memory.
+#ifdef WEB_BUILD
+#define WORLD_COLS 512
+#define WORLD_ROWS 512
+#else
+#define WORLD_COLS 2048
+#define WORLD_ROWS 2048
+#endif
 
 // ===== GAMEPLAY CONSTANTS =====
 const int MAX_SAVE_SLOTS = 5;

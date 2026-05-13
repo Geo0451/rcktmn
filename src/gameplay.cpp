@@ -72,6 +72,19 @@ void handleCollisions(Player& player, const Vector2& nextPosition, const TileMap
     }
 }
 
+// For web builds we disable persistent save/load (use in-memory only or IndexedDB externally)
+#ifdef WEB_BUILD
+void saveLevelToSlot(const TileMap& tileMap, const Player& player, int slot)
+{
+    // No-op in web demo build. Persistence should be handled using IDBFS mounts in the HTML build script.
+}
+
+bool loadLevelFromSlot(TileMap& tileMap, Player& player, int slot)
+{
+    // No persistent load available in web demo build.
+    return false;
+}
+#else
 void saveLevelToSlot(const TileMap& tileMap, const Player& player, int slot)
 {
     std::string filename = "sf_" + std::to_string(slot) + ".dat";
@@ -125,3 +138,4 @@ bool loadLevelFromSlot(TileMap& tileMap, Player& player, int slot)
     loadFile.close();
     return true;
 }
+#endif

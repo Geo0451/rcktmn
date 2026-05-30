@@ -14,7 +14,17 @@ Vector2 Player::updated_pos(float dt)
     
     if (flying)
     {
+        flyVelX = Clamp(flyVelX, -x_max_vel * 2.0f, x_max_vel * 2.0f);
+        if (flyVelX < 0.1f && flyVelX > -0.1f)
+            flyVelX = 0;
+        else
+            flyVelX *= 0.95f;
+
         flyVelY = Clamp(flyVelY, -y_max_vel * 2.0f, y_max_vel * 2.0f);
+        if (flyVelY < 0.1f && flyVelY > -0.1f)
+            flyVelY = 0;
+        else
+            flyVelY *= 0.95f;
     }
     else
     {
@@ -27,9 +37,10 @@ Vector2 Player::updated_pos(float dt)
         dir.x = dir.x / x_friction;
 
     float newY = pos.y + (flying ? flyVelY * speed * dt : dir.y * speed * dt);
+    float newX = pos.x + (flying ? flyVelX * speed * dt : dir.x * speed * dt);
     
     return {
-        pos.x + (dir.x * speed * dt),
+        newX,
         newY
     };
 }
@@ -61,9 +72,4 @@ int Inventory::getBlockCount(int blockType)
     if (blockType >= 0 && blockType < NUM_SLOTS)
         return blockCounts[blockType];
     return 0;
-}
-
-int Inventory::getSelectedBlockType()
-{
-    return selectedSlot;
 }

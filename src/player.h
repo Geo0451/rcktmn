@@ -23,6 +23,7 @@ public:
     
     // Maker mode flight
     bool flying = false;
+    float flyVelX = 0.0f;
     float flyVelY = 0.0f;
 
     Vector2 updated_pos(float dt);
@@ -42,5 +43,4 @@ public:
     void addBlock(int blockType, int count = 1);
     bool removeBlock(int blockType, int count = 1);
     int getBlockCount(int blockType);
-    int getSelectedBlockType();
 };

@@ -322,12 +322,11 @@ void TileMap::generate(unsigned int seed, float surfaceHeightFactor, float rough
 
 void TileMap::generateClouds(unsigned int seed, Vector2 spawnPos)
 {
-    std::mt19937 rng(seed);
     int cloudLayerY = 80;
     int spawnTileX = (int)spawnPos.x / TILE_SIZE;
     int spawnTileY = (int)spawnPos.y / TILE_SIZE;
     
-    // Generate fluffy, realistic-looking clouds using layered density clustering
+    // Keep the same cluster spawning mechanics, but make the silhouettes and shading softer.
     int numCloudClusters = 12;
     
     for (int clusterIdx = 0; clusterIdx < numCloudClusters; clusterIdx++)
@@ -344,12 +343,12 @@ void TileMap::generateClouds(unsigned int seed, Vector2 spawnPos)
         int distSq = distX * distX + distY * distY;
         if (distSq < 15000) continue;
         
-        // Cloud shape: fluffy, organic with multiple "puffs"
+        // Cloud shape: fluffy, organic with multiple overlapping puffs
         int numPuffs = 3 + (clusterRng() % 4); // 3-6 puffs per cloud
-        int cloudWidthBase = 50 + (clusterRng() % 60);
-        int cloudHeightBase = 20 + (clusterRng() % 30);
+        int cloudWidthBase = 54 + (clusterRng() % 58);
+        int cloudHeightBase = 18 + (clusterRng() % 24);
         
-        // Create multiple overlapping spherical puffs for organic cloud look
+        // Create multiple overlapping ovals with a brighter top and softer underside
         for (int puffIdx = 0; puffIdx < numPuffs; puffIdx++)
         {
             std::mt19937 puffRng(seed + clusterIdx * 54321 + puffIdx * 98765);
@@ -361,13 +360,14 @@ void TileMap::generateClouds(unsigned int seed, Vector2 spawnPos)
             int puffCenterX = centerX + puffOffX;
             int puffCenterY = centerY + puffOffY;
             
-            // Randomize puff size (smaller puffs = better cloud look)
-            int puffRadius = 15 + (puffRng() % 25);
+            // Randomize puff size, biasing wider than tall for a cloud-like profile
+            int puffRadiusX = 18 + (puffRng() % 20);
+            int puffRadiusY = 9 + (puffRng() % 10);
             
-            // Draw puff using spherical falloff
-            for (int dy = -puffRadius; dy <= puffRadius; dy++)
+            // Draw puff using elliptical falloff with soft top highlights and gray undersides
+            for (int dy = -puffRadiusY; dy <= puffRadiusY; dy++)
             {
-                for (int dx = -puffRadius; dx <= puffRadius; dx++)
+                for (int dx = -puffRadiusX; dx <= puffRadiusX; dx++)
                 {
                     int tileX = puffCenterX + dx;
                     int tileY = puffCenterY + dy;
@@ -375,30 +375,28 @@ void TileMap::generateClouds(unsigned int seed, Vector2 spawnPos)
                     if (!inBounds(tileX, tileY) || isSolid(tileX, tileY))
                         continue;
                     
-                    // Spherical distance falloff for smooth puffs
-                    float distFromPuffCenter = sqrt((float)(dx*dx + dy*dy));
-                    float falloff = 1.0f - (distFromPuffCenter / (float)puffRadius);
+                    float nx = (float)dx / (float)puffRadiusX;
+                    float ny = (float)dy / (float)puffRadiusY;
+                    float distFromPuffCenter = sqrtf(nx * nx + ny * ny);
+                    float falloff = 1.0f - distFromPuffCenter;
                     
                     if (falloff > 0.0f)
                     {
                         // Add some noise to break up the perfect sphere
                         std::mt19937 noiseRng(seed + (tileX + 1) * 73856093U ^ (tileY + 1) * 19349663U);
-                        float noiseFactor = 0.8f + (float)(noiseRng() % 100) / 500.0f;
+                        float noiseFactor = 0.82f + (float)(noiseRng() % 100) / 350.0f;
                         falloff *= noiseFactor;
                         
-                        if (falloff > 0.3f) // Only place cloud if density is visible
+                        if (falloff > 0.24f) // Only place cloud if density is visible
                         {
-                            // Opacity increases toward puff center
-                            float alpha = 0.4f + (falloff * 0.5f);
-                            Color cloudColor = Fade(WHITE, alpha);
-                            
-                            // Blend with existing cloud if already set (multi-puff overlap)
-                            if (isSolid(tileX, tileY))
-                            {
-                                Color existing = tileAt(tileX, tileY).color;
-                                cloudColor.a = std::max((unsigned char)existing.a, cloudColor.a);
-                            }
-                            
+                            // Brighter toward the top, softer/greyer toward the underside
+                            float topBias = Clamp(1.0f - ((float)(dy + puffRadiusY) / (float)(2 * puffRadiusY)), 0.0f, 1.0f);
+                            float brightness = 210.0f + falloff * 45.0f + topBias * 25.0f;
+                            brightness = Clamp(brightness, 190.0f, 255.0f);
+                            unsigned char shade = (unsigned char)brightness;
+                            unsigned char alpha = (unsigned char)Clamp(110.0f + falloff * 120.0f, 90.0f, 235.0f);
+                            Color cloudColor = {shade, shade, (unsigned char)Clamp((float)shade + topBias * 6.0f, 0.0f, 255.0f), alpha};
+
                             tileAt(tileX, tileY) = {true, cloudColor};
                         }
                     }

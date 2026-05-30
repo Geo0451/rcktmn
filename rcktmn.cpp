@@ -25,6 +25,32 @@ T Clamp(T value, T min_val, T max_val) {
     return (value < min_val) ? min_val : (value > max_val) ? max_val : value;
 }
 
+static bool sameColor(Color a, Color b)
+{
+    return a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a;
+}
+
+static int minedBlockTypeFromTile(const Tile& tile)
+{
+    if (sameColor(tile.color, BROWN)) return 0;
+    if (sameColor(tile.color, GRAY)) return 1;
+    return -1;
+}
+
+static Color selectedInventoryBlockColor(const Inventory& inventory)
+{
+    if (inventory.blockCounts[inventory.selectedSlot] <= 0)
+        return WHITE;
+
+    if (inventory.selectedSlot == 0)
+        return BROWN;
+
+    if (inventory.selectedSlot == 1)
+        return GRAY;
+
+    return WHITE;
+}
+
 // World dimensions in pixels
 const int worldWidth  = WORLD_COLS * TILE_SIZE;
 const int worldHeight = WORLD_ROWS * TILE_SIZE;
@@ -43,9 +69,6 @@ int main()
     SaveLoadMode pauseMode = NONE;
     GameState gameState = MENU;
     
-    // Survival mode states
-    enum SurvivalState { MINING, PLACING };
-    SurvivalState survivalState = MINING;
     bool showInventory = false;
     float miningHeldTime = 0.0f;
     const float MINING_TIME_REQUIRED = 0.3f;
@@ -75,7 +98,6 @@ int main()
     TileMap tileMap;
     unsigned int seedVal = 0;
     std::string seedInput = "";
-    bool previewGenerated = false;
 
     // World generation parameters
     float surfaceHeight = 0.25f;        // 0.0-1.0, where on screen is surface
@@ -84,12 +106,6 @@ int main()
     float caveThreshold = 0.40f;        // 0.05-0.80, higher = fewer caves
     float caveSurfaceBias = 0.22f;      // 0.00-0.50, higher = more surface overlap
     int caveSmoothIterations = 5;       // 1-12, more = smoother/connected caves
-    int numWorms = 20;                  // 5-40, number of cave worms (DEPRECATED - kept for compatibility)
-    int wormMinLength = 50;             // 30-100 (DEPRECATED)
-    int wormMaxLength = 200;            // 150-400 (DEPRECATED)
-    int wormMinRadius = 2;              // 1-4 (DEPRECATED)
-    int wormMaxRadius = 5;              // 3-7 (DEPRECATED)
-    float wormDownwardBias = 0.7f;      // 0.3-1.0 (DEPRECATED)
 
     // ----- Camera setup -----
     Camera2D camera    = {};
@@ -136,7 +152,6 @@ int main()
                 gameState = PREVIEW;
                 tileMap.generate(seedVal, surfaceHeight, surfaceRoughness, caveDensity, caveThreshold, caveSurfaceBias, caveSmoothIterations);
                 tileMap.generateClouds(seedVal, player.pos);
-                previewGenerated = true;
             }
 
             // Render menu
@@ -250,7 +265,6 @@ int main()
             {
                 gameState = MENU;
                 seedInput = "";
-                previewGenerated = false;
                 continue;
             }
 
@@ -287,7 +301,6 @@ int main()
             {
                 tileMap.generate(seedVal, surfaceHeight, surfaceRoughness, caveDensity, caveThreshold, caveSurfaceBias, caveSmoothIterations);
                 tileMap.generateClouds(seedVal, player.pos);
-                previewGenerated = true;
             }
             
             // Also allow R key to regenerate
@@ -295,7 +308,6 @@ int main()
             {
                 tileMap.generate(seedVal, surfaceHeight, surfaceRoughness, caveDensity, caveThreshold, caveSurfaceBias, caveSmoothIterations);
                 tileMap.generateClouds(seedVal, player.pos);
-                previewGenerated = true;
             }
 
             // Regenerate button
@@ -339,7 +351,7 @@ int main()
 
         // === PLAYING STATE ===
         float wheel = GetMouseWheelMove();
-        if (wheel != 0.0f)
+        if (pauseMode == NONE && !showInventory && wheel != 0.0f)
         {
             camera.zoom += wheel * ZOOM_STEP;
             camera.zoom = Clamp(camera.zoom, ZOOM_MIN, ZOOM_MAX);
@@ -359,24 +371,19 @@ int main()
         // ----- INPUT -----
         if (pauseMode == NONE)
         {
-            handlePlayerInput(player);
+            if (!makerMode && !showInventory)
+                handlePlayerInput(player);
             
             // Survival mode: TAB toggles inventory
             if (!makerMode && IsKeyPressed(KEY_TAB))
             {
                 showInventory = !showInventory;
-            }
-            
-            // Survival mode: ESC returns to mining mode
-            if (!makerMode && survivalState == PLACING && IsKeyPressed(KEY_ESCAPE))
-            {
-                survivalState = MINING;
                 miningHeldTime = 0.0f;
             }
             
-            // Survival mode: hold-to-mine controls
-            // - LMB hold to mine with progress overlay; breaks when timer reaches MINING_TIME_REQUIRED
-            // - RMB places the selected block only if the player has blocks in selected slot
+            // Survival mode: direct Minecraft-style controls
+            // - LMB hold to mine and break blocks
+            // - RMB places the selected block if the target tile is empty
             if (!makerMode && !showInventory)
             {
                 // Left click hold: accumulate mining time
@@ -392,12 +399,12 @@ int main()
 
                         if (tileMap.inBounds(tx, ty) && tileMap.isSolid(tx, ty))
                         {
-                            int blockType = 0; // determine by color
                             Tile& tile = tileMap.tileAt(tx, ty);
-                            if (tile.color.r == 100) blockType = 1; // stone heuristic
+                            int blockType = minedBlockTypeFromTile(tile);
 
                             tileMap.tileAt(tx, ty).solid = false;
-                            inventory.addBlock(blockType, 1);
+                            if (blockType >= 0)
+                                inventory.addBlock(blockType, 1);
                             consoleMessages.push_back({1.0f, "MINED BLOCK", YELLOW});
                             miningHeldTime = 0.0f;  // Reset for next mine
                         }
@@ -408,7 +415,7 @@ int main()
                     miningHeldTime = 0.0f;  // Reset when mouse is released
                 }
 
-                // Right click: place selected block if we have any in the selected slot
+                // Right click: place selected block immediately
                 if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT))
                 {
                     int tx = (int)worldMouse.x / TILE_SIZE;
@@ -462,13 +469,18 @@ int main()
                 makerMode = !makerMode;
                 if (makerMode)
                 {
+                    showInventory = false;
+                    miningHeldTime = 0.0f;
                     player.flying = true;
+                    player.flyVelX = 0.0f;
                     player.flyVelY = 0.0f;
                     consoleMessages.push_back(Message{2.0f, "MAKER MODE ON  B:BLOCKS  L:DRAG  R:ERASE  CTRL-M:OFF", WHITE});
                 }
                 else
                 {
                     player.flying = false;
+                    player.flyVelX = 0.0f;
+                    miningHeldTime = 0.0f;
                     consoleMessages.push_back(Message{1.0f, "MAKER MODE OFF", WHITE});
                 }
             }
@@ -477,6 +489,14 @@ int main()
             if (makerMode && player.flying)
             {
                 float flyAccel = 8.0f;  // Flight acceleration
+                if (IsKeyDown(KEY_A))
+                {
+                    player.flyVelX -= flyAccel;  // Negative X = left
+                }
+                if (IsKeyDown(KEY_D))
+                {
+                    player.flyVelX += flyAccel;  // Positive X = right
+                }
                 if (IsKeyDown(KEY_W))
                 {
                     player.flyVelY -= flyAccel;  // Negative Y = up
@@ -484,11 +504,6 @@ int main()
                 if (IsKeyDown(KEY_S))
                 {
                     player.flyVelY += flyAccel;  // Positive Y = down
-                }
-                // Natural deceleration when not pressing fly keys
-                if (!IsKeyDown(KEY_W) && !IsKeyDown(KEY_S))
-                {
-                    player.flyVelY *= 0.95f;  // Smooth deceleration
                 }
             }
 
@@ -538,7 +553,7 @@ int main()
         }
 
         // ----- PHYSICS -----
-        if (pauseMode == NONE)
+        if (pauseMode == NONE && !showInventory)
         {
             player.dir.y += GRAVITY;
             Vector2 nextPos = player.updated_pos(deltaTime);
@@ -595,34 +610,21 @@ int main()
                         (float)TILE_SIZE
                     };
                     
-                    if (survivalState == MINING)
-                    {
-                        // Show mining cursor (green for solid, faded for empty)
-                        bool isSolid = tileMap.isSolid(hc, hr);
-                        DrawRectangleLinesEx(hover, 2, isSolid ? GREEN : Fade(GREEN, 0.3f));
+                    // Show one cursor for both mining and placing: selected block color, or white when nothing is selected
+                    bool isSolid = tileMap.isSolid(hc, hr);
+                    Color cursorColor = selectedInventoryBlockColor(inventory);
+                    DrawRectangleLinesEx(hover, 2, cursorColor);
 
-                        // If player is mining, overlay progress directly on the block like Minecraft
-                        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && isSolid)
-                        {
-                            float progress = Clamp(miningHeldTime / MINING_TIME_REQUIRED, 0.0f, 1.0f);
-                            // Semi-transparent white overlay scaled by progress
-                            DrawRectangle((int)hover.x, (int)hover.y, (int)hover.width, (int)hover.height, Fade(WHITE, 0.2f + 0.6f * progress));
-                            // Draw simple crack lines whose alpha increases with progress
-                            Color crack = Fade(BLACK, progress);
-                            DrawLine((int)hover.x, (int)hover.y, (int)(hover.x + hover.width), (int)(hover.y + hover.height), crack);
-                            DrawLine((int)(hover.x + hover.width), (int)hover.y, (int)hover.x, (int)(hover.y + hover.height), crack);
-                        }
-                    }
-                    else if (survivalState == PLACING)
+                    // If player is mining, overlay progress directly on the block like Minecraft
+                    if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && isSolid)
                     {
-                        // Show placement cursor (yellow for empty, red if occupied)
-                        bool isEmpty = !tileMap.isSolid(hc, hr);
-                        Color cursorColor = isEmpty ? YELLOW : RED;
-                        DrawRectangleLinesEx(hover, 2, cursorColor);
-                        
-                        // Fill preview
-                        Color previewColor = (inventory.selectedSlot == 0) ? BROWN : GRAY;
-                        DrawRectangle((int)hover.x, (int)hover.y, TILE_SIZE, TILE_SIZE, Fade(previewColor, 0.2f));
+                        float progress = Clamp(miningHeldTime / MINING_TIME_REQUIRED, 0.0f, 1.0f);
+                        // Semi-transparent white overlay scaled by progress
+                        DrawRectangle((int)hover.x, (int)hover.y, (int)hover.width, (int)hover.height, Fade(WHITE, 0.2f + 0.6f * progress));
+                        // Draw simple crack lines whose alpha increases with progress
+                        Color crack = Fade(BLACK, progress);
+                        DrawLine((int)hover.x, (int)hover.y, (int)(hover.x + hover.width), (int)(hover.y + hover.height), crack);
+                        DrawLine((int)(hover.x + hover.width), (int)hover.y, (int)hover.x, (int)(hover.y + hover.height), crack);
                     }
                 }
             }
@@ -691,9 +693,8 @@ int main()
 
                     // Slot content preview
                     Color blockColor = DARKGRAY;
-                    const char* name = "Empty";
-                    if (idx == 0) { blockColor = BROWN; name = "Dirt"; }
-                    else if (idx == 1) { blockColor = GRAY; name = "Stone"; }
+                    if (idx == 0) { blockColor = BROWN; }
+                    else if (idx == 1) { blockColor = GRAY; }
 
                     int previewPad = 10;
                     DrawRectangle(sx + previewPad, sy + previewPad, slotSize - previewPad*2, slotSize - previewPad*2 - 20, blockColor);
@@ -707,7 +708,7 @@ int main()
             else
             {
                 // Minimal HUD: show help text only
-                DrawText("TAB: Inventory | LMB: Mine | RMB: Place Mode (1-9: Select) | ESC: Cancel", 20, scrHeight - 30, 14, DARKGRAY);
+                DrawText("TAB: Inventory | LMB: Mine | RMB: Place | 1-9: Select Slot", 20, scrHeight - 30, 14, DARKGRAY);
             }
 
             // Draw the player circle with HP-indicative color (overrides stored player.clr)

@@ -5,6 +5,8 @@
 #include <string>
 #include <random>
 #include <raylib.h>
+#include <algorithm>
+#include <algorithm>
 
 #include "src/constants.h"
 #include "src/ui.h"
@@ -19,11 +21,7 @@ const int scrHeight = SCREEN_HEIGHT;
 const int fpsMax    = FPS_MAX;
 const int MAX_SLOTS = MAX_SAVE_SLOTS;
 
-// Helper: Clamp function (if not available from raylib)
-template<typename T>
-T Clamp(T value, T min_val, T max_val) {
-    return (value < min_val) ? min_val : (value > max_val) ? max_val : value;
-}
+// Use raylib's `Clamp` function (provided by `raylib.h`)
 
 static bool sameColor(Color a, Color b)
 {
@@ -197,14 +195,14 @@ int main()
                 
                 // Slider knob position
                 float t = (value - minVal) / (maxVal - minVal);
-                t = Clamp(t, 0.0f, 1.0f);
+                t = std::clamp(t, 0.0f, 1.0f);
                 float knobX = sliderX + t * sliderW;
                 
                 // Check for click/drag anywhere on slider bar
                 if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, sliderBar))
                 {
                     float newT = (mouse.x - sliderX) / sliderW;
-                    newT = Clamp(newT, 0.0f, 1.0f);
+                    newT = std::clamp(newT, 0.0f, 1.0f);
                     value = minVal + newT * (maxVal - minVal);
                 }
                 
@@ -227,14 +225,14 @@ int main()
                 
                 // Slider knob position
                 float t = (float)(value - minVal) / (float)(maxVal - minVal);
-                t = Clamp(t, 0.0f, 1.0f);
+                t = std::clamp(t, 0.0f, 1.0f);
                 float knobX = sliderX + t * sliderW;
                 
                 // Check for click/drag anywhere on slider bar
                 if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, sliderBar))
                 {
                     float newT = (mouse.x - sliderX) / sliderW;
-                    newT = Clamp(newT, 0.0f, 1.0f);
+                    newT = std::clamp(newT, 0.0f, 1.0f);
                     value = (int)(minVal + newT * (float)(maxVal - minVal));
                 }
                 
@@ -354,7 +352,7 @@ int main()
         if (pauseMode == NONE && !showInventory && wheel != 0.0f)
         {
             camera.zoom += wheel * ZOOM_STEP;
-            camera.zoom = Clamp(camera.zoom, ZOOM_MIN, ZOOM_MAX);
+            camera.zoom = std::clamp(camera.zoom, ZOOM_MIN, ZOOM_MAX);
         }
 
         // World-space mouse position (needed for maker mode under any zoom level)
@@ -577,12 +575,12 @@ int main()
         // Clamp camera to world bounds
         float camWidth = (float)scrWidth / camera.zoom;
         float camHeight = (float)scrHeight / camera.zoom;
-        camera.target.x = Clamp(camera.target.x, camWidth * 0.5f, (float)worldWidth - camWidth * 0.5f);
-        camera.target.y = Clamp(camera.target.y, camHeight * 0.5f, (float)worldHeight - camHeight * 0.5f);
+        camera.target.x = std::clamp(camera.target.x, camWidth * 0.5f, (float)worldWidth - camWidth * 0.5f);
+        camera.target.y = std::clamp(camera.target.y, camHeight * 0.5f, (float)worldHeight - camHeight * 0.5f);
 
         // ----- RENDERING -----
         // Precompute player color (HP indicator) so we can draw player inside world space
-        float hpPct_draw = Clamp((float)player.hp / (float)player.maxHp, 0.0f, 1.0f);
+        float hpPct_draw = std::clamp((float)player.hp / (float)player.maxHp, 0.0f, 1.0f);
         Color playerColor_draw = {(unsigned char)(hpPct_draw * 255.0f), 0, 0, 255};
 
         BeginDrawing();
@@ -618,7 +616,7 @@ int main()
                     // If player is mining, overlay progress directly on the block like Minecraft
                     if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && isSolid)
                     {
-                        float progress = Clamp(miningHeldTime / MINING_TIME_REQUIRED, 0.0f, 1.0f);
+                        float progress = std::clamp(miningHeldTime / MINING_TIME_REQUIRED, 0.0f, 1.0f);
                         // Semi-transparent white overlay scaled by progress
                         DrawRectangle((int)hover.x, (int)hover.y, (int)hover.width, (int)hover.height, Fade(WHITE, 0.2f + 0.6f * progress));
                         // Draw simple crack lines whose alpha increases with progress
@@ -648,7 +646,7 @@ int main()
         if (!makerMode)
         {
             // Player color now indicates HP: interpolate between BLACK (0) and RED (max)
-            float hpPct = Clamp((float)player.hp / (float)player.maxHp, 0.0f, 1.0f);
+            float hpPct = std::clamp((float)player.hp / (float)player.maxHp, 0.0f, 1.0f);
             Color playerColor = {(unsigned char)(hpPct * 255.0f), 0, 0, 255};
 
             // Draw inventory grid or HUD-less overlay modes

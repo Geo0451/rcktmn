@@ -55,15 +55,16 @@ if [[ -n "${RAYLIB_DIR:-}" ]]; then
     exit 3
   fi
 else
-  echo "No RAYLIB_DIR set. Attempting to fetch and build raylib for Emscripten (this may take several minutes)."
+  echo "No RAYLIB_DIR set. Building raylib for Emscripten in scripts/raylib_web/ (this may take several minutes)."
 
-  # Clone raylib into third_party and build it with emcmake/emmake
-  REPO_ROOT="$(pwd)"
-  THIRD_DIR="$REPO_ROOT/third_party"
-  RAYLIB_SRC="$THIRD_DIR/raylib"
-  mkdir -p "$THIRD_DIR"
+  # Use scripts/raylib_web for Emscripten raylib
+  SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  RAYLIB_DIR="$SCRIPTS_DIR/raylib_web"
+  RAYLIB_SRC="$RAYLIB_DIR/raylib"
+  mkdir -p "$RAYLIB_DIR"
+  
   if [[ ! -d "$RAYLIB_SRC" ]]; then
-    echo "Cloning raylib..."
+    echo "Cloning raylib into $RAYLIB_DIR..."
     git clone --depth 1 https://github.com/raysan5/raylib.git "$RAYLIB_SRC"
   else
     echo "Found existing raylib in $RAYLIB_SRC"
@@ -110,8 +111,7 @@ else
   FOUND_LIB="$(realpath "$FOUND_LIB")"
 
   # Set RAYLIB_DIR to the source root for includes, and lib path for linking
-  RAYLIB_DIR="$RAYLIB_SRC"
-  EMCC_EXTRA+=( -I"$RAYLIB_DIR/src" "$FOUND_LIB" )
+  EMCC_EXTRA+=( -I"$RAYLIB_SRC/src" "$FOUND_LIB" )
   popd >/dev/null
 
   emcc "${SRCS[@]}" "${EMCC_FLAGS[@]}" "${EMCC_EXTRA[@]}" -o "$OUT_JS"
@@ -148,14 +148,7 @@ cat > "$OUT_HTML" <<'HTML'
       background: #111;
     }
     #topbar {
-      flex: 0 0 auto;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 12px 16px;
-      background: rgba(0, 0, 0, 0.6);
-      border-bottom: 1px solid #333;
-      z-index: 2;
+      display: none;
     }
     #topbar h3 {
       margin: 0;
@@ -188,7 +181,7 @@ cat > "$OUT_HTML" <<'HTML'
     canvas {
       display: block;
       width: 100vw;
-      height: calc(100vh - 56px);
+      height: 100vh;
       image-rendering: pixelated;
       background: #000;
     }

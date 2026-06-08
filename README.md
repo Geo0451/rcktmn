@@ -2,10 +2,11 @@
 
 A 2D tile-based survival and creative sandbox game built with raylib and C++17.
 
+### [PLAY](https://geo0451.github.io/rcktmn/docs/)
+
 ## About
 
 RCKTMN is a voxel-inspired sandbox where you can explore procedurally generated worlds, mine blocks, build structures, and switch between survival and creative modes. The game features dynamic world generation with caves and clouds, inventory management, and save/load functionality.
-
 ## Features
 
 - Procedurally generated 2048x2048 tile worlds with terrain, caves, and clouds

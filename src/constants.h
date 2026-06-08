@@ -9,8 +9,8 @@ const int FPS_MAX       = 60;
 const int TILE_SIZE   = 20;    // Pixel size per tile
 // For web demo builds we use a much smaller world to fit Wasm memory.
 #ifdef WEB_BUILD
-#define WORLD_COLS 512
-#define WORLD_ROWS 512
+#define WORLD_COLS 1024
+#define WORLD_ROWS 1024
 #else
 #define WORLD_COLS 2048
 #define WORLD_ROWS 2048

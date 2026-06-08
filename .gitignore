@@ -1,0 +1,24 @@
+# Build artifacts
+rcktmn
+rcktmn.exe
+rcktmn.out
+a.out
+
+# Raylib build directories (too large, users can rebuild)
+scripts/raylib_web/
+scripts/raylib_windows/
+
+# Save files
+*.dat
+sf_*.dat
+
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+*.swp
+*.swo
+*~

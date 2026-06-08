@@ -4,7 +4,7 @@ set -euo pipefail
 # Build script for Emscripten web demo of rcktmn
 # Requirements: emcc (Emscripten SDK) installed and on PATH.
 
-OUT_DIR="web_build"
+OUT_DIR="docs"
 mkdir -p "$OUT_DIR"
 
 echo "Checking for emcc..."

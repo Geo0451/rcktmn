@@ -3,13 +3,13 @@
 #include "constants.h"
 #include "tilemap.h"
 
-// ===== COLLISION SYSTEM =====
+// ===== PHYSICS & COLLISION =====
 
-void handleCollisions(class Player& player, const Vector2& nextPosition, const TileMap& tileMap);
+void tickPlayerPhysics(class Player& player, const TileMap& tileMap, float dt);
 
 // ===== PLAYER INPUT =====
 
-void handlePlayerInput(class Player& player);
+void handlePlayerInput(class Player& player, float dt);
 
 // ===== SAVE/LOAD SYSTEM =====
 

@@ -16,6 +16,9 @@ public:
     float x_friction;
     float x_max_vel, y_max_vel;
     bool canJump;
+    bool onGround = false;
+    float coyoteTimer = 0.0f;
+    float jumpBufferTimer = 0.0f;
     
     // Survival mode stats
     int hp = 100;
@@ -25,8 +28,6 @@ public:
     bool flying = false;
     float flyVelX = 0.0f;
     float flyVelY = 0.0f;
-
-    Vector2 updated_pos(float dt);
 };
 
 // ===== INVENTORY CLASS =====

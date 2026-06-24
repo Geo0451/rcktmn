@@ -254,6 +254,8 @@ int main()
                 {
                     player.pos.x = centerCol * TILE_SIZE + TILE_SIZE * 0.5f;
                     player.pos.y = surfRow * TILE_SIZE - player.size - 1.0f;
+                    player.onGround = true;
+                    player.coyoteTimer = COYOTE_TIME;
                 }
                 camera.target = player.pos;
             }
@@ -370,7 +372,7 @@ int main()
         if (pauseMode == NONE)
         {
             if (!makerMode && !showInventory)
-                handlePlayerInput(player);
+                handlePlayerInput(player, deltaTime);
             
             // Survival mode: TAB toggles inventory
             if (!makerMode && IsKeyPressed(KEY_TAB))
@@ -486,23 +488,16 @@ int main()
             // Creative flight controls (only in maker mode)
             if (makerMode && player.flying)
             {
-                float flyAccel = 8.0f;  // Flight acceleration
+                const float flyAccel = 8.0f;
+                const float frameScale = deltaTime * PHYSICS_FPS_REF;
                 if (IsKeyDown(KEY_A))
-                {
-                    player.flyVelX -= flyAccel;  // Negative X = left
-                }
+                    player.flyVelX -= flyAccel * frameScale;
                 if (IsKeyDown(KEY_D))
-                {
-                    player.flyVelX += flyAccel;  // Positive X = right
-                }
+                    player.flyVelX += flyAccel * frameScale;
                 if (IsKeyDown(KEY_W))
-                {
-                    player.flyVelY -= flyAccel;  // Negative Y = up
-                }
+                    player.flyVelY -= flyAccel * frameScale;
                 if (IsKeyDown(KEY_S))
-                {
-                    player.flyVelY += flyAccel;  // Positive Y = down
-                }
+                    player.flyVelY += flyAccel * frameScale;
             }
 
             // Block type hotkeys (only in maker mode, when menu not open)
@@ -552,11 +547,7 @@ int main()
 
         // ----- PHYSICS -----
         if (pauseMode == NONE && !showInventory)
-        {
-            player.dir.y += GRAVITY;
-            Vector2 nextPos = player.updated_pos(deltaTime);
-            handleCollisions(player, nextPos, tileMap);
-        }
+            tickPlayerPhysics(player, tileMap, deltaTime);
 
         // Camera follows the player in normal play; maker mode can zoom all the way out to a full-map overview
         if (makerMode)

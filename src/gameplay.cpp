@@ -2,30 +2,42 @@
 #include "player.h"
 #include "tilemap.h"
 #include "constants.h"
+#include <algorithm>
+#include <cmath>
 #include <fstream>
 
-void handlePlayerInput(Player& player)
+template<typename T>
+static T ClampVal(T value, T minVal, T maxVal)
 {
-    if (IsKeyDown(KEY_A)) player.dir.x -= HORIZONTAL_MOVE_SPEED;
-    if (IsKeyDown(KEY_D)) player.dir.x += HORIZONTAL_MOVE_SPEED;
-    if (IsKeyDown(KEY_S)) player.dir.y += VERTICAL_MOVE_SPEED;
-
-    if (IsKeyDown(KEY_SPACE) && player.canJump)
-        player.dir.y -= VERTICAL_MOVE_SPEED * JUMP_MULTIPLIER;
-
-    if (IsKeyPressed(KEY_W) && player.canJump)
-        player.dir.y -= VERTICAL_MOVE_SPEED * JUMP_MULTIPLIER;
+    return std::max(minVal, std::min(value, maxVal));
 }
 
-void handleCollisions(Player& player, const Vector2& nextPosition, const TileMap& tileMap)
+static Rectangle playerBounds(const Player& player)
 {
-    player.pos    = nextPosition;
-    player.canJump = false;
+    return {
+        player.pos.x - player.size,
+        player.pos.y - player.size,
+        player.size * 2.0f,
+        player.size * 2.0f
+    };
+}
 
-    int left   = (int)(player.pos.x - player.size) / TILE_SIZE;
-    int right  = (int)(player.pos.x + player.size) / TILE_SIZE;
-    int top    = (int)(player.pos.y - player.size) / TILE_SIZE;
-    int bottom = (int)(player.pos.y + player.size) / TILE_SIZE;
+static void tileRangeForPlayer(const Player& player, int& left, int& right, int& top, int& bottom)
+{
+    left   = (int)std::floor((player.pos.x - player.size) / TILE_SIZE);
+    right  = (int)std::floor((player.pos.x + player.size) / TILE_SIZE);
+    top    = (int)std::floor((player.pos.y - player.size) / TILE_SIZE);
+    bottom = (int)std::floor((player.pos.y + player.size) / TILE_SIZE);
+}
+
+static void resolveMoveX(Player& player, const TileMap& tileMap, float dx)
+{
+    if (dx == 0.0f) return;
+
+    player.pos.x += dx;
+
+    int left, right, top, bottom;
+    tileRangeForPlayer(player, left, right, top, bottom);
 
     for (int row = top; row <= bottom; row++)
     {
@@ -33,43 +45,174 @@ void handleCollisions(Player& player, const Vector2& nextPosition, const TileMap
         {
             if (!tileMap.isSolid(col, row)) continue;
 
-            Rectangle playerBB = {
-                player.pos.x - player.size,
-                player.pos.y - player.size,
-                player.size * 2,
-                player.size * 2
-            };
+            Rectangle tileRect = tileMap.getTileRect(col, row);
+            Rectangle bb = playerBounds(player);
+            if (!CheckCollisionRecs(bb, tileRect)) continue;
+
+            if (dx > 0.0f)
+            {
+                player.pos.x = tileRect.x - player.size;
+                if (player.flying) player.flyVelX = 0.0f;
+                else player.dir.x = 0.0f;
+            }
+            else
+            {
+                player.pos.x = tileRect.x + tileRect.width + player.size;
+                if (player.flying) player.flyVelX = 0.0f;
+                else player.dir.x = 0.0f;
+            }
+        }
+    }
+}
+
+static void resolveMoveY(Player& player, const TileMap& tileMap, float dy)
+{
+    if (dy == 0.0f) return;
+
+    player.pos.y += dy;
+
+    int left, right, top, bottom;
+    tileRangeForPlayer(player, left, right, top, bottom);
+
+    for (int row = top; row <= bottom; row++)
+    {
+        for (int col = left; col <= right; col++)
+        {
+            if (!tileMap.isSolid(col, row)) continue;
 
             Rectangle tileRect = tileMap.getTileRect(col, row);
-            if (!CheckCollisionRecs(playerBB, tileRect)) continue;
+            Rectangle bb = playerBounds(player);
+            if (!CheckCollisionRecs(bb, tileRect)) continue;
 
-            Rectangle overlap = GetCollisionRec(playerBB, tileRect);
-
-            if (overlap.width > overlap.height)
+            if (dy > 0.0f)
             {
-                player.dir.y = 0;
-                float tileMidY = tileRect.y + tileRect.height * 0.5f;
-                if (player.pos.y < tileMidY)
-                {
-                    player.pos.y -= overlap.height;
-                    player.canJump = true;
-                }
+                player.pos.y = tileRect.y - player.size;
+                if (player.flying) player.flyVelY = 0.0f;
                 else
                 {
-                    player.pos.y += overlap.height;
+                    player.dir.y = 0.0f;
+                    player.onGround = true;
                 }
             }
             else
             {
-                player.dir.x = 0;
-                float tileMidX = tileRect.x + tileRect.width * 0.5f;
-                if (player.pos.x < tileMidX)
-                    player.pos.x -= overlap.width;
-                else
-                    player.pos.x += overlap.width;
+                player.pos.y = tileRect.y + tileRect.height + player.size;
+                if (player.flying) player.flyVelY = 0.0f;
+                else player.dir.y = 0.0f;
             }
         }
     }
+}
+
+static void moveAxisX(Player& player, const TileMap& tileMap, float totalDx)
+{
+    const float maxStep = TILE_SIZE * 0.5f;
+    float remaining = totalDx;
+
+    while (std::fabs(remaining) > 0.0001f)
+    {
+        float step = remaining;
+        if (std::fabs(step) > maxStep)
+            step = (remaining > 0.0f) ? maxStep : -maxStep;
+
+        remaining -= step;
+        resolveMoveX(player, tileMap, step);
+    }
+}
+
+static void moveAxisY(Player& player, const TileMap& tileMap, float totalDy)
+{
+    if (totalDy == 0.0f) return;
+
+    player.onGround = false;
+
+    const float maxStep = TILE_SIZE * 0.5f;
+    float remaining = totalDy;
+
+    while (std::fabs(remaining) > 0.0001f)
+    {
+        float step = remaining;
+        if (std::fabs(step) > maxStep)
+            step = (remaining > 0.0f) ? maxStep : -maxStep;
+
+        remaining -= step;
+        resolveMoveY(player, tileMap, step);
+    }
+}
+
+void handlePlayerInput(Player& player, float dt)
+{
+    const float frameScale = dt * PHYSICS_FPS_REF;
+
+    if (IsKeyDown(KEY_A)) player.dir.x -= HORIZONTAL_MOVE_SPEED * frameScale;
+    if (IsKeyDown(KEY_D)) player.dir.x += HORIZONTAL_MOVE_SPEED * frameScale;
+    if (IsKeyDown(KEY_S)) player.dir.y += VERTICAL_MOVE_SPEED * frameScale;
+
+    if (IsKeyPressed(KEY_SPACE) || IsKeyPressed(KEY_W))
+        player.jumpBufferTimer = JUMP_BUFFER_TIME;
+}
+
+void tickPlayerPhysics(Player& player, const TileMap& tileMap, float dt)
+{
+    const float frameScale = dt * PHYSICS_FPS_REF;
+
+    if (player.jumpBufferTimer > 0.0f)
+        player.jumpBufferTimer -= dt;
+
+    if (!player.flying &&
+        player.jumpBufferTimer > 0.0f &&
+        player.coyoteTimer > 0.0f)
+    {
+        player.dir.y = -VERTICAL_MOVE_SPEED * JUMP_MULTIPLIER;
+        player.jumpBufferTimer = 0.0f;
+        player.coyoteTimer = 0.0f;
+        player.onGround = false;
+    }
+
+    if (!player.flying)
+        player.dir.y += GRAVITY * frameScale;
+
+    player.dir.x = ClampVal(player.dir.x, -player.x_max_vel, player.x_max_vel);
+
+    if (player.flying)
+    {
+        player.flyVelX = ClampVal(player.flyVelX, -player.x_max_vel * 2.0f, player.x_max_vel * 2.0f);
+        player.flyVelY = ClampVal(player.flyVelY, -player.y_max_vel * 2.0f, player.y_max_vel * 2.0f);
+
+        if (player.flyVelX > -0.1f && player.flyVelX < 0.1f)
+            player.flyVelX = 0.0f;
+        else
+            player.flyVelX *= std::pow(0.95f, frameScale);
+
+        if (player.flyVelY > -0.1f && player.flyVelY < 0.1f)
+            player.flyVelY = 0.0f;
+        else
+            player.flyVelY *= std::pow(0.95f, frameScale);
+    }
+    else
+    {
+        player.dir.y = ClampVal(player.dir.y, -player.y_max_vel * 1.5f, player.y_max_vel * 2.0f);
+
+        if (player.dir.x > -0.1f && player.dir.x < 0.1f)
+            player.dir.x = 0.0f;
+        else
+            player.dir.x *= std::pow(1.0f / player.x_friction, frameScale);
+    }
+
+    const float velX = player.flying ? player.flyVelX : player.dir.x;
+    const float velY = player.flying ? player.flyVelY : player.dir.y;
+    const float moveX = velX * player.speed * frameScale;
+    const float moveY = velY * player.speed * frameScale;
+
+    moveAxisX(player, tileMap, moveX);
+    moveAxisY(player, tileMap, moveY);
+
+    if (player.onGround)
+        player.coyoteTimer = COYOTE_TIME;
+    else
+        player.coyoteTimer -= dt;
+
+    player.canJump = !player.flying && player.coyoteTimer > 0.0f;
 }
 
 // For web builds we disable persistent save/load (use in-memory only or IndexedDB externally)
@@ -116,8 +259,13 @@ bool loadLevelFromSlot(TileMap& tileMap, Player& player, int slot)
         return false;
     }
 
-    player.dir    = {0, 0};
+    player.dir = {0, 0};
+    player.flyVelX = 0.0f;
+    player.flyVelY = 0.0f;
     player.canJump = false;
+    player.onGround = false;
+    player.coyoteTimer = 0.0f;
+    player.jumpBufferTimer = 0.0f;
     tileMap.clear();
 
     int col, row, r, g, b, a;

@@ -19,11 +19,14 @@ const int TILE_SIZE   = 20;    // Pixel size per tile
 // ===== GAMEPLAY CONSTANTS =====
 const int MAX_SAVE_SLOTS = 5;
 
-// Player movement
+// Player movement (tuned for 60 Hz reference; scaled by dt in physics tick)
 const float HORIZONTAL_MOVE_SPEED = 0.85f;
 const float VERTICAL_MOVE_SPEED   = 0.8f;
 const float JUMP_MULTIPLIER       = 4.0f;
 const float GRAVITY               = 0.1f;
+const float PHYSICS_FPS_REF       = 60.0f;
+const float COYOTE_TIME           = 0.12f;
+const float JUMP_BUFFER_TIME      = 0.12f;
 
 // Mining
 const float MINING_TIME_REQUIRED = 0.3f;

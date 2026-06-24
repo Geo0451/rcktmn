@@ -2,7 +2,7 @@
 
 A 2D tile-based survival and creative sandbox game built with raylib and C++17.
 
-### [PLAY](https://geo0451.github.io/rcktmn/docs/)
+### [PLAY](https://geo0451.github.io/rcktmn/)
 
 ## About
 
